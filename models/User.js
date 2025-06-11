@@ -14,13 +14,6 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  outlookSync: {
-    firstSyncComplete: { type: Boolean, default: false },
-    firstSyncedRange: {
-      start: Date,
-      end: Date
-    }
-  },
   appUserId: {
     type: String,
     unique: true,
