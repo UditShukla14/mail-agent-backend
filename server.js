@@ -48,11 +48,24 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
   preflightContinue: false,
-  optionsSuccessStatus: 204
+  optionsSuccessStatus: 204,
+  exposedHeaders: ['Content-Length', 'X-Foo', 'X-Bar']
 };
 
 // Apply CORS middleware
 app.use(cors(corsOptions));
+
+// Add a middleware to ensure CORS headers are set
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  }
+  next();
+});
 
 // Socket.IO configuration
 const io = new Server(httpServer, {
@@ -60,14 +73,37 @@ const io = new Server(httpServer, {
     origin: allowedOrigins,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['Content-Length', 'X-Foo', 'X-Bar']
   },
   path: '/socket.io',
-  transports: ['websocket', 'polling'],
+  transports: ['polling', 'websocket'],
   pingTimeout: 60000,
   pingInterval: 25000,
   connectTimeout: 45000,
-  allowEIO3: true
+  allowEIO3: true,
+  allowUpgrades: true,
+  cookie: {
+    name: 'io',
+    path: '/',
+    httpOnly: true,
+    sameSite: 'none',
+    secure: true
+  }
+});
+
+// Add a middleware to handle WebSocket upgrade requests
+app.use((req, res, next) => {
+  if (req.headers.upgrade && req.headers.upgrade.toLowerCase() === 'websocket') {
+    const origin = req.headers.origin;
+    if (allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    }
+  }
+  next();
 });
 
 // Middleware
