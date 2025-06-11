@@ -21,24 +21,34 @@ const httpServer = createServer(app);
 // CORS configuration
 const allowedOrigins = [
   'https://mail-agent-frontend.vercel.app',
+  'https://mail-agent-frontend-4hbx1esee-uditshuklas-projects.vercel.app',
   'http://localhost:3000'
 ];
 
 const corsOptions = {
   origin: function (origin, callback) {
+    console.log('🔍 Checking CORS for origin:', origin);
+    console.log('📋 Allowed origins:', allowedOrigins);
+    
     // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
+    if (!origin) {
+      console.log('✅ Allowing request with no origin');
+      return callback(null, true);
+    }
     
     if (allowedOrigins.includes(origin)) {
+      console.log('✅ Allowing request from:', origin);
       callback(null, true);
     } else {
-      console.log('CORS blocked request from origin:', origin);
+      console.log('❌ Blocking request from:', origin);
       callback(new Error('Not allowed by CORS'));
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  credentials: true,
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 };
 
 // Apply CORS middleware
@@ -48,7 +58,7 @@ app.use(cors(corsOptions));
 const io = new Server(httpServer, {
   cors: {
     origin: allowedOrigins,
-    methods: ['GET', 'POST'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization']
   },
