@@ -35,16 +35,11 @@ const corsOptions = {
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
-  preflightContinue: false,
-  optionsSuccessStatus: 204
+  credentials: true
 };
 
 // Apply CORS middleware
 app.use(cors(corsOptions));
-
-// Handle preflight requests
-app.options('*', cors(corsOptions));
 
 // Socket.IO configuration
 const io = new Server(httpServer, {
