@@ -26,7 +26,7 @@ jobs:
       - name: Deploy to Digital Ocean
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.DROPLET_HOST }}
+          host: 159.65.166.242
           username: ${{ secrets.DROPLET_USERNAME }}
           key: ${{ secrets.DROPLET_SSH_KEY }}
           script: |
