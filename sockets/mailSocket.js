@@ -141,9 +141,17 @@ export const initMailSocket = (socket, io) => {
       // Start enrichment in background with batch processing
       if (validMessages.length > 0) {
         try {
-          console.log(`🔄 Starting batch enrichment for ${validMessages.length} messages`);
-          // Add to enrichment queue instead of direct processing
-          await enrichmentQueueService.addToQueue(validMessages);
+          // Filter out already enriched messages before adding to queue
+          const messagesNeedingEnrichment = validMessages.filter(msg => 
+            !msg.isProcessed || !msg.aiMeta?.enrichedAt || msg.aiMeta?.error
+          );
+
+          if (messagesNeedingEnrichment.length > 0) {
+            console.log(`🔄 Starting batch enrichment for ${messagesNeedingEnrichment.length} unenriched messages`);
+            await enrichmentQueueService.addToQueue(messagesNeedingEnrichment);
+          } else {
+            console.log('✅ All messages are already enriched');
+          }
         } catch (error) {
           console.error('❌ Failed to start enrichment process:', error);
           socket.emit('mail:error', 'Failed to start enrichment process');
