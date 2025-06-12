@@ -95,11 +95,15 @@ class EnrichmentQueueService {
         const batch = this.queue.splice(0, this.batchSize);
         console.log(`🔄 Processing batch of ${batch.length} emails`);
         
-        await this.processBatch(batch);
+        const result = await this.processBatch(batch);
         
-        if (this.queue.length > 0) {
+        // Only continue if there are actually unprocessed emails
+        if (result && this.queue.length > 0) {
           console.log(`⏳ Waiting ${this.rateLimitDelay/1000} seconds before next batch...`);
           await new Promise(resolve => setTimeout(resolve, this.rateLimitDelay));
+        } else {
+          // If no unprocessed emails or queue is empty, break the loop
+          break;
         }
       }
     } catch (error) {
@@ -140,7 +144,7 @@ class EnrichmentQueueService {
 
     if (unprocessedEmails.length === 0) {
       console.log('✅ All emails in batch are already enriched or invalid');
-      return true; // Return true to indicate successful processing
+      return false; // Return false to indicate no processing was needed
     }
 
     console.log('📝 Processing', unprocessedEmails.length, 'unprocessed emails');
