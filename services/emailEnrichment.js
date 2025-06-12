@@ -143,7 +143,7 @@ class EmailEnrichmentService {
       
       if (unenrichedEmails.length === 0) {
         console.log('📧 No emails need enrichment');
-        return;
+        return true; // Return true to indicate successful processing
       }
 
       console.log(`📧 Found ${unenrichedEmails.length} emails needing enrichment`);
@@ -203,6 +203,8 @@ class EmailEnrichmentService {
           // Continue with next batch even if one fails
         }
       }
+
+      return true; // Return true to indicate successful processing
     } catch (error) {
       console.error('❌ Error in enrichBatch:', error);
       if (socket) {

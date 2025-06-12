@@ -134,7 +134,7 @@ class EnrichmentQueueService {
 
     if (unprocessedEmails.length === 0) {
       console.log('✅ All emails in batch are already enriched or invalid');
-      return;
+      return true; // Return true to indicate successful processing
     }
 
     console.log('📝 Processing', unprocessedEmails.length, 'unprocessed emails');
@@ -152,14 +152,8 @@ class EnrichmentQueueService {
         console.log(`🔄 Processing API batch of ${emailBatch.length} emails`);
         
         // Process the entire batch at once using emailEnrichmentService
-        const results = await emailEnrichmentService.enrichBatch(emailBatch);
-        
-        // Handle results
-        if (results) {
-          console.log(`✅ Successfully processed batch of ${emailBatch.length} emails`);
-        } else {
-          console.error(`❌ Failed to process batch of ${emailBatch.length} emails`);
-        }
+        await emailEnrichmentService.enrichBatch(emailBatch);
+        console.log(`✅ Successfully processed batch of ${emailBatch.length} emails`);
 
         // Add delay between batches to prevent rate limiting
         if (batches.indexOf(emailBatch) < batches.length - 1) {
@@ -171,6 +165,8 @@ class EnrichmentQueueService {
         // Continue with next batch even if one fails
       }
     }
+
+    return true; // Return true to indicate successful processing
   }
 
   getQueueLength() {
