@@ -21,6 +21,20 @@ class EmailEnrichmentService {
         throw new Error('Invalid email object - missing required fields');
       }
 
+      // Initialize aiMeta if it doesn't exist
+      if (!email.aiMeta) {
+        email.aiMeta = {
+          summary: null,
+          category: null,
+          priority: null,
+          sentiment: null,
+          actionItems: [],
+          enrichedAt: null,
+          version: null,
+          error: null
+        };
+      }
+
       // Skip if already enriched and not forcing reprocess
       if (!forceReprocess && email.isProcessed && email.aiMeta?.summary) {
         console.log('⏭️ Email already enriched, skipping:', email.id);
@@ -43,12 +57,14 @@ class EmailEnrichmentService {
       
       // Remove fallback values if they don't exist
       const cleanedAnalysis = {
-        summary: analysis.summary,
-        category: analysis.category,
-        priority: analysis.priority || undefined,
-        sentiment: analysis.sentiment || undefined,
-        actionItems: analysis.actionItems || [],
-        enrichedAt: new Date()
+        summary: analysis.summary || 'No summary available',
+        category: analysis.category || 'Other',
+        priority: analysis.priority || 'medium',
+        sentiment: analysis.sentiment || 'neutral',
+        actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
+        enrichedAt: new Date().toISOString(),
+        version: '1.0',
+        error: null
       };
 
       // Update email with analysis
@@ -81,6 +97,8 @@ class EmailEnrichmentService {
       await Email.findByIdAndUpdate(email._id, {
         $set: {
           'aiMeta.error': error.message,
+          'aiMeta.enrichedAt': new Date().toISOString(),
+          'aiMeta.version': '1.0',
           isProcessed: false
         }
       });
