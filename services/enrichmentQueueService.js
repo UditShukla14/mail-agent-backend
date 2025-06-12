@@ -42,9 +42,15 @@ class EnrichmentQueueService {
         console.log('❌ No valid emails to process');
         return;
       }
-      
-      // Add valid emails to queue
-      this.queue.push(...validEmails);
+
+      // Filter out already enriched emails before adding to queue
+      const unenrichedEmails = await this.filterUnenrichedEmails(validEmails);
+      if (unenrichedEmails.length === 0) {
+        console.log('✅ All emails are already enriched. Nothing to add to queue.');
+        return;
+      }
+
+      this.queue.push(...unenrichedEmails);
       
       // Start processing if not already running
       if (!this.processing) {
