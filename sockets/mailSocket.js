@@ -146,15 +146,20 @@ export const initMailSocket = (socket, io) => {
       if (validMessages.length > 0) {
         try {
           // Filter out already enriched messages before adding to queue
-          const messagesNeedingEnrichment = validMessages.filter(msg => 
-            !msg.isProcessed || !msg.aiMeta?.enrichedAt || msg.aiMeta?.error
-          );
+          const messagesNeedingEnrichment = validMessages.filter(msg => {
+            // Skip if message has been enriched (has enrichedAt timestamp)
+            if (msg.aiMeta?.enrichedAt) {
+              console.log(`⏭️ Skipping already enriched message ${msg.id} (enriched at: ${msg.aiMeta.enrichedAt})`);
+              return false;
+            }
+            return true;
+          });
 
           if (messagesNeedingEnrichment.length > 0) {
             console.log(`🔄 Starting batch enrichment for ${messagesNeedingEnrichment.length} unenriched messages`);
             await enrichmentQueueService.addToQueue(messagesNeedingEnrichment);
           } else {
-            console.log('✅ All messages are already enriched');
+            console.log('✅ All messages are already enriched, skipping enrichment process');
           }
         } catch (error) {
           console.error('❌ Failed to start enrichment process:', error);
