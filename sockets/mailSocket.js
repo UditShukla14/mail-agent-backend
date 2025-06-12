@@ -28,6 +28,9 @@ export const initMailSocket = (socket, io) => {
 
   // 📥 INIT
   socket.on('mail:init', async ({ appUserId, email }) => {
+    // Store appUserId on socket for later use
+    socket.appUserId = appUserId;
+    
     const token = await getToken(appUserId, email, 'outlook');
     if (!token) return socket.emit('mail:error', 'Token not found');
 
@@ -61,12 +64,12 @@ export const initMailSocket = (socket, io) => {
         return;
       }
 
-      console.log(`💾 Saving ${messages.length} messages to database`);
+      console.log(`🔄 Processing ${messages.length} messages`);
 
-      // Save messages to database with proper validation
+      // Process messages efficiently
       const savedMessages = await Promise.all(messages.map(async msg => {
         try {
-          // First check if message exists
+          // First check if message exists and get its current state
           const existingMessage = await Email.findOne({ id: msg.id });
           
           // If message exists and hasn't changed, return it
@@ -81,7 +84,7 @@ export const initMailSocket = (socket, io) => {
             return existingMessage;
           }
 
-          // Ensure all required fields are present
+          // Message is new or has changed, prepare update data
           const emailData = {
             id: msg.id,
             userId: user._id,
@@ -95,7 +98,7 @@ export const initMailSocket = (socket, io) => {
             folder: folderId,
             important: msg.important || false,
             flagged: msg.flagged || false,
-            isProcessed: false,
+            isProcessed: existingMessage?.isProcessed || false,
             updatedAt: new Date()
           };
 
@@ -109,6 +112,7 @@ export const initMailSocket = (socket, io) => {
             return null;
           }
 
+          // Only update if message is new or has changed
           const savedMsg = await Email.findOneAndUpdate(
             { id: msg.id },
             { $set: emailData },
@@ -128,7 +132,7 @@ export const initMailSocket = (socket, io) => {
       }));
 
       const validMessages = savedMessages.filter(Boolean);
-      console.log(`✅ Successfully saved ${validMessages.length} messages`);
+      console.log(`✅ Successfully processed ${validMessages.length} messages`);
 
       // Emit messages immediately
       socket.emit('mail:folderMessages', {

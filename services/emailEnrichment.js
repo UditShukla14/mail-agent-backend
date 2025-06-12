@@ -5,12 +5,12 @@ import User from '../models/User.js';
 
 class EmailEnrichmentService {
   constructor() {
-    this.socket = null;
+    this.io = null;
     this.enrichmentQueue = new Set();
   }
 
-  setSocket(socket) {
-    this.socket = socket;
+  setIO(io) {
+    this.io = io;
   }
 
   async enrichEmail(email, forceReprocess = false) {
@@ -43,9 +43,16 @@ class EmailEnrichmentService {
 
       console.log('🚀 Starting email enrichment for:', email.id);
       
-      // Emit analyzing status
-      if (this.socket) {
-        this.socket.emit('mail:enrichmentStatus', {
+      // Get user to find their socket
+      const user = await User.findById(email.userId);
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      // Find the socket for this user
+      const userSocket = this.findUserSocket(user.appUserId);
+      if (userSocket) {
+        userSocket.emit('mail:enrichmentUpdate', {
           messageId: email.id,
           status: 'analyzing',
           message: 'Analyzing email content...'
@@ -79,13 +86,14 @@ class EmailEnrichmentService {
         { new: true }
       );
 
-      // Emit completion status
-      if (this.socket) {
-        this.socket.emit('mail:enrichmentStatus', {
+      // Emit completion status to specific user
+      if (userSocket) {
+        userSocket.emit('mail:enrichmentUpdate', {
           messageId: email.id,
           status: 'completed',
           message: 'Analysis complete',
-          aiMeta: cleanedAnalysis
+          aiMeta: cleanedAnalysis,
+          email: updatedEmail
         });
       }
 
@@ -103,22 +111,51 @@ class EmailEnrichmentService {
         }
       });
 
-      // Emit error status
-      if (this.socket) {
-        this.socket.emit('mail:enrichmentStatus', {
-          messageId: email.id,
-          status: 'error',
-          message: error.message
-        });
+      // Get user to find their socket
+      const user = await User.findById(email.userId);
+      if (user) {
+        const userSocket = this.findUserSocket(user.appUserId);
+        if (userSocket) {
+          userSocket.emit('mail:enrichmentUpdate', {
+            messageId: email.id,
+            status: 'error',
+            message: error.message
+          });
+        }
       }
 
       throw error;
     }
   }
 
+  // Helper method to find a user's socket
+  findUserSocket(appUserId) {
+    if (!this.io) return null;
+    
+    // Get all connected sockets
+    const sockets = Array.from(this.io.sockets.sockets.values());
+    
+    // Find the socket that has this appUserId
+    return sockets.find(socket => socket.appUserId === appUserId);
+  }
+
   async enrichBatch(emails, socket) {
     try {
       console.log(`🔄 Starting batch enrichment for ${emails.length} emails`);
+
+      // Get the appUserId from the first email's user
+      const firstEmail = emails[0];
+      if (!firstEmail || !firstEmail.userId) {
+        throw new Error('Invalid email batch - missing user information');
+      }
+
+      const user = await User.findById(firstEmail.userId);
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      // Find the socket for this user
+      const userSocket = this.findUserSocket(user.appUserId);
 
       // Filter out already enriched emails and validate required fields
       const unenrichedEmails = [];
@@ -143,14 +180,14 @@ class EmailEnrichmentService {
         const existingEmail = await Email.findById(email._id);
         if (existingEmail?.aiMeta?.enrichedAt && !existingEmail?.aiMeta?.error) {
           console.log(`✅ Email ${email.id} already enriched`);
-          // Emit already enriched status
-          if (socket) {
-            socket.emit('mail:enrichmentUpdate', {
+          // Emit already enriched status to specific user
+          if (userSocket) {
+            userSocket.emit('mail:enrichmentUpdate', {
               messageId: email.id,
               status: 'completed',
               message: 'Already enriched',
               aiMeta: existingEmail.aiMeta,
-              email: existingEmail // Send full email object
+              email: existingEmail
             });
           }
           continue;
@@ -201,17 +238,17 @@ class EmailEnrichmentService {
                   },
                   isProcessed: true
                 },
-                { new: true } // Return the updated document
+                { new: true }
               );
 
-              // Emit success status with full email object
-              if (socket) {
-                socket.emit('mail:enrichmentUpdate', {
+              // Emit success status to specific user
+              if (userSocket) {
+                userSocket.emit('mail:enrichmentUpdate', {
                   messageId: email.id,
                   status: 'completed',
                   message: 'Analysis complete',
                   aiMeta: analysis,
-                  email: updatedEmail // Send full email object
+                  email: updatedEmail
                 });
               }
             }
@@ -224,17 +261,17 @@ class EmailEnrichmentService {
           }
         } catch (error) {
           console.error('❌ Error processing batch:', error);
-          // Emit error for each email in the batch
-          batch.forEach(email => {
-            if (socket) {
-              socket.emit('mail:enrichmentUpdate', {
+          // Emit error to specific user
+          if (userSocket) {
+            batch.forEach(email => {
+              userSocket.emit('mail:enrichmentUpdate', {
                 messageId: email.id,
                 status: 'error',
                 message: error.message,
                 error: true
               });
-            }
-          });
+            });
+          }
           // Continue with next batch even if one fails
         }
       }
