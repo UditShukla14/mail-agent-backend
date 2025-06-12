@@ -20,6 +20,12 @@ export const initMailSocket = (socket, io) => {
 
   const folderPaginationMap = new Map();
 
+  // Handle real-time enrichment updates
+  socket.on('mail:enrichmentUpdate', (data) => {
+    // Broadcast the update to all connected clients
+    io.emit('mail:enrichmentUpdate', data);
+  });
+
   // 📥 INIT
   socket.on('mail:init', async ({ appUserId, email }) => {
     const token = await getToken(appUserId, email, 'outlook');

@@ -127,11 +127,12 @@ class EmailEnrichmentService {
           console.log(`✅ Email ${email.id} already enriched`);
           // Emit already enriched status
           if (socket) {
-            socket.emit('mail:enrichmentStatus', {
+            socket.emit('mail:enrichmentUpdate', {
               messageId: email.id,
               status: 'completed',
               message: 'Already enriched',
-              aiMeta: existingEmail.aiMeta
+              aiMeta: existingEmail.aiMeta,
+              email: existingEmail // Send full email object
             });
           }
           continue;
@@ -143,7 +144,7 @@ class EmailEnrichmentService {
       
       if (unenrichedEmails.length === 0) {
         console.log('📧 No emails need enrichment');
-        return true; // Return true to indicate successful processing
+        return true;
       }
 
       console.log(`📧 Found ${unenrichedEmails.length} emails needing enrichment`);
@@ -171,23 +172,28 @@ class EmailEnrichmentService {
           await Promise.all(batch.map(async (email, index) => {
             const analysis = analyses[index];
             if (analysis) {
-              await Email.findByIdAndUpdate(email._id, {
-                aiMeta: {
-                  ...analysis,
-                  enrichedAt: new Date(),
-                  error: null,
-                  version: '1.0'
+              const updatedEmail = await Email.findByIdAndUpdate(
+                email._id,
+                {
+                  aiMeta: {
+                    ...analysis,
+                    enrichedAt: new Date(),
+                    error: null,
+                    version: '1.0'
+                  },
+                  isProcessed: true
                 },
-                isProcessed: true
-              });
+                { new: true } // Return the updated document
+              );
 
-              // Emit success status
+              // Emit success status with full email object
               if (socket) {
-                socket.emit('mail:enrichmentStatus', {
+                socket.emit('mail:enrichmentUpdate', {
                   messageId: email.id,
                   status: 'completed',
                   message: 'Analysis complete',
-                  aiMeta: analysis
+                  aiMeta: analysis,
+                  email: updatedEmail // Send full email object
                 });
               }
             }
@@ -200,11 +206,22 @@ class EmailEnrichmentService {
           }
         } catch (error) {
           console.error('❌ Error processing batch:', error);
+          // Emit error for each email in the batch
+          batch.forEach(email => {
+            if (socket) {
+              socket.emit('mail:enrichmentUpdate', {
+                messageId: email.id,
+                status: 'error',
+                message: error.message,
+                error: true
+              });
+            }
+          });
           // Continue with next batch even if one fails
         }
       }
 
-      return true; // Return true to indicate successful processing
+      return true;
     } catch (error) {
       console.error('❌ Error in enrichBatch:', error);
       if (socket) {
