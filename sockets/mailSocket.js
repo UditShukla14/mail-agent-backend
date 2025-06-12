@@ -117,11 +117,12 @@ export const initMailSocket = (socket, io) => {
         nextLink: newNextLink
       });
 
-      // Start enrichment in background
+      // Start enrichment in background with batch processing
       if (validMessages.length > 0) {
         try {
-          console.log(`🔄 Starting enrichment for ${validMessages.length} messages`);
-          await emailEnrichmentService.enrichBatch(validMessages, socket);
+          console.log(`🔄 Starting batch enrichment for ${validMessages.length} messages`);
+          // Add to enrichment queue instead of direct processing
+          await enrichmentQueueService.addToQueue(validMessages);
         } catch (error) {
           console.error('❌ Failed to start enrichment process:', error);
           socket.emit('mail:error', 'Failed to start enrichment process');

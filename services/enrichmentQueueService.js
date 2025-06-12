@@ -139,59 +139,37 @@ class EnrichmentQueueService {
 
     console.log('📝 Processing', unprocessedEmails.length, 'unprocessed emails');
     
-    // Process remaining unprocessed emails
-    for (const email of unprocessedEmails) {
-      try {
-        // Check if we're within rate limits
-        if (this.currentTokens >= this.maxTokensPerMinute) {
-          console.log('⏳ Rate limit reached, waiting for token reset...');
-          await new Promise(resolve => setTimeout(resolve, 60000)); // Wait 1 minute
-          this.currentTokens = 0;
-        }
-
-        // Estimate tokens for this email
-        const estimatedTokens = Math.ceil(email.content?.length / 4) || 100; // Default to 100 if no content
-        
-        if (this.currentTokens + estimatedTokens > this.maxTokensPerMinute) {
-          console.log('⏳ Would exceed rate limit, waiting for token reset...');
-          await new Promise(resolve => setTimeout(resolve, 60000));
-          this.currentTokens = 0;
-        }
-
-        console.log(`🔄 Processing email ${email.id} for ${email.email}`);
-        
-        // Process the email
-        const result = await this.processEmailWithRetry(email);
-        
-        if (result.success) {
-          console.log(`✅ Successfully processed email ${email.id}`);
-        } else {
-          console.error(`❌ Failed to process email ${email.id}:`, result.error);
-        }
-        
-        // Add delay between processing to avoid overwhelming the API
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      } catch (error) {
-        console.error('❌ Error processing email:', email.id, error);
-        // Continue with next email even if one fails
-      }
+    // Process emails in batches of 5 for API calls
+    const batchSize = 5;
+    const batches = [];
+    
+    for (let i = 0; i < unprocessedEmails.length; i += batchSize) {
+      batches.push(unprocessedEmails.slice(i, i + batchSize));
     }
-  }
 
-  async processEmailWithRetry(email, retryCount = 0) {
-    try {
-      const result = await emailEnrichmentService.enrichEmail(email);
-      return { success: true, data: result };
-    } catch (error) {
-      console.error(`❌ Attempt ${retryCount + 1} failed for email ${email.id}: ${error.message}`);
-      
-      if (retryCount < this.maxRetries) {
-        console.log(`⏳ Waiting ${this.rateLimitDelay/1000} seconds before retry...`);
-        await new Promise(resolve => setTimeout(resolve, this.rateLimitDelay));
-        return this.processEmailWithRetry(email, retryCount + 1);
+    for (const emailBatch of batches) {
+      try {
+        console.log(`🔄 Processing API batch of ${emailBatch.length} emails`);
+        
+        // Process the entire batch at once using emailEnrichmentService
+        const results = await emailEnrichmentService.enrichBatch(emailBatch);
+        
+        // Handle results
+        if (results) {
+          console.log(`✅ Successfully processed batch of ${emailBatch.length} emails`);
+        } else {
+          console.error(`❌ Failed to process batch of ${emailBatch.length} emails`);
+        }
+
+        // Add delay between batches to prevent rate limiting
+        if (batches.indexOf(emailBatch) < batches.length - 1) {
+          console.log('⏳ Waiting 30 seconds before next batch...');
+          await new Promise(resolve => setTimeout(resolve, 30000));
+        }
+      } catch (error) {
+        console.error('❌ Error processing batch:', error);
+        // Continue with next batch even if one fails
       }
-      
-      return { success: false, error };
     }
   }
 
