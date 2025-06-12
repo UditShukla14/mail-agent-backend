@@ -66,6 +66,21 @@ export const initMailSocket = (socket, io) => {
       // Save messages to database with proper validation
       const savedMessages = await Promise.all(messages.map(async msg => {
         try {
+          // First check if message exists
+          const existingMessage = await Email.findOne({ id: msg.id });
+          
+          // If message exists and hasn't changed, return it
+          if (existingMessage && 
+              existingMessage.subject === (msg.subject || '(No Subject)') &&
+              existingMessage.from === (msg.from || '') &&
+              existingMessage.preview === (msg.preview || '') &&
+              existingMessage.read === (msg.read || false) &&
+              existingMessage.important === (msg.important || false) &&
+              existingMessage.flagged === (msg.flagged || false)) {
+            console.log(`⏭️ Skipping unchanged message ${msg.id}`);
+            return existingMessage;
+          }
+
           // Ensure all required fields are present
           const emailData = {
             id: msg.id,
@@ -104,7 +119,7 @@ export const initMailSocket = (socket, io) => {
             }
           );
 
-          console.log(`✅ Saved message ${msg.id}`);
+          console.log(`✅ ${existingMessage ? 'Updated' : 'Saved new'} message ${msg.id}`);
           return savedMsg;
         } catch (error) {
           console.error(`❌ Failed to save message ${msg.id}:`, error);
