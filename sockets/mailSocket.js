@@ -5,7 +5,8 @@ import {
   getMessageById,
   sendEmail,
   markMessageRead,
-  markMessageImportant
+  markMessageImportant,
+  deleteMessage
 } from '../services/outlookService.js';
 
 import { getToken } from '../utils/tokenManager.js';
@@ -319,6 +320,35 @@ export const initMailSocket = (socket, io) => {
     } catch (error) {
       console.error('❌ Failed to retry enrichment:', error);
       socket.emit('mail:error', 'Failed to retry enrichment: ' + error.message);
+    }
+  });
+
+  // 🗑️ Delete message
+  socket.on('mail:delete', async ({ appUserId, email, messageId }) => {
+    try {
+      console.log('🗑️ Delete message requested:', { appUserId, email, messageId });
+      
+      const token = await getToken(appUserId, email, 'outlook');
+      if (!token) {
+        console.error('❌ Token not found for:', email);
+        return socket.emit('mail:error', 'Token not found');
+      }
+
+      // Delete from Outlook
+      const success = await deleteMessage(token, messageId);
+      if (!success) {
+        throw new Error('Failed to delete message from Outlook');
+      }
+
+      // Delete from our database
+      await Email.deleteOne({ id: messageId });
+      console.log('✅ Message deleted successfully:', messageId);
+
+      // Notify client of successful deletion
+      socket.emit('mail:deleted', { messageId });
+    } catch (error) {
+      console.error('❌ Error deleting message:', error);
+      socket.emit('mail:error', 'Failed to delete message: ' + error.message);
     }
   });
 

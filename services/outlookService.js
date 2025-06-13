@@ -73,8 +73,18 @@ async function getMailFolders(accessToken) {
 // get mail by id 
 async function getMessageById(accessToken, messageId) {
   try {
-    // Fetch raw MIME
-    const res = await axios.get(
+    // First get the message metadata including importance
+    const metadataRes = await axios.get(
+      `https://graph.microsoft.com/v1.0/me/messages/${messageId}?$select=id,importance,isRead,flag`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        }
+      }
+    );
+
+    // Then fetch raw MIME for content
+    const mimeRes = await axios.get(
       `https://graph.microsoft.com/v1.0/me/messages/${messageId}/$value`,
       {
         headers: {
@@ -86,7 +96,7 @@ async function getMessageById(accessToken, messageId) {
     );
 
     // Parse MIME
-    const parsed = await simpleParser(res.data);
+    const parsed = await simpleParser(mimeRes.data);
 
     // Inline + regular attachments
     const attachments = parsed.attachments.map(att => ({
@@ -105,10 +115,10 @@ async function getMessageById(accessToken, messageId) {
       subject: parsed.subject || '',
       content: parsed.html || parsed.textAsHtml || '',
       timestamp: parsed.date?.toISOString() || new Date().toISOString(),
-      read: true, // MIME doesn't expose isRead
+      read: metadataRes.data.isRead || false,
       folder: null, // Not available in MIME
-      important: false, // Not available in MIME
-      flagged: false,   // Not available in MIME
+      important: metadataRes.data.importance === "high",
+      flagged: metadataRes.data.flag?.flagStatus === "flagged",
       attachments
     };
   } catch (err) {
@@ -252,6 +262,22 @@ async function getAttachmentsByMessageId(accessToken, messageId) {
   }
 }
 
-
+export const deleteMessage = async (token, messageId) => {
+  try {
+    const response = await axios.delete(
+      `https://graph.microsoft.com/v1.0/me/messages/${messageId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    return response.status === 204;
+  } catch (error) {
+    console.error('Error deleting message:', error);
+    throw error;
+  }
+};
 
 export { sendEmail, getMailFolders, getMessageById, getMessagesByFolder, markMessageRead, markMessageImportant, getAttachmentsByMessageId };
