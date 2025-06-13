@@ -30,8 +30,8 @@ jobs:
           username: ${{ secrets.DROPLET_USERNAME }}
           key: ${{ secrets.DROPLET_SSH_KEY }}
           script: |
-            cd /var/www/backend
+            cd .. && cd /var/www/backend
             git pull origin main
             npm install
             npm run build
-            pm2 restart backend 
+            pm2 restart all 
