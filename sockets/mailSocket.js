@@ -16,7 +16,7 @@ import emailEnrichmentService from '../services/emailEnrichment.js';
 import enrichmentQueueService from '../services/enrichmentQueueService.js';
 import axios from 'axios';
 import emailService from '../services/emailService.js';
-import outlookService from '../services/outlookService.js';
+import { io } from 'socket.io';
 
 export const initMailSocket = (socket, io) => {
   console.log(`📬 Mail socket connected: ${socket.id}`);
@@ -188,7 +188,7 @@ export const initMailSocket = (socket, io) => {
       const token = await getToken(appUserId, email, 'outlook');
       if (!token) return socket.emit('mail:error', 'Token not found');
 
-      const message = await outlookService.getMessageById(token, messageId);
+      const message = await getMessageById(token, messageId);
       console.log('[Debug] Message details being sent:', {
         id: message.id,
         hasAttachments: message.attachments?.length > 0,
