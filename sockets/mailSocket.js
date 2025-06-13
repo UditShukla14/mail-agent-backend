@@ -15,6 +15,7 @@ import Email from '../models/email.js';
 import emailEnrichmentService from '../services/emailEnrichment.js';
 import enrichmentQueueService from '../services/enrichmentQueueService.js';
 import axios from 'axios';
+import emailService from '../services/emailService.js';
 
 export const initMailSocket = (socket, io) => {
   console.log(`📬 Mail socket connected: ${socket.id}`);
@@ -340,8 +341,8 @@ export const initMailSocket = (socket, io) => {
         throw new Error('Failed to delete message from Outlook');
       }
 
-      // Delete from our database
-      await Email.deleteOne({ id: messageId });
+      // Delete from our database and update counts
+      await emailService.deleteMessage(appUserId, email, messageId);
       console.log('✅ Message deleted successfully:', messageId);
 
       // Notify client of successful deletion

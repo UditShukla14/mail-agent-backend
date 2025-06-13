@@ -73,6 +73,8 @@ async function getMailFolders(accessToken) {
 // get mail by id 
 async function getMessageById(accessToken, messageId) {
   try {
+    console.log(`🔍 Fetching message ${messageId}`);
+    
     // First get the message metadata including importance
     const metadataRes = await axios.get(
       `https://graph.microsoft.com/v1.0/me/messages/${messageId}?$select=id,importance,isRead,flag`,
@@ -97,6 +99,7 @@ async function getMessageById(accessToken, messageId) {
 
     // Parse MIME
     const parsed = await simpleParser(mimeRes.data);
+    console.log(`📎 Raw attachments from MIME:`, parsed.attachments);
 
     // Inline + regular attachments
     const attachments = parsed.attachments.map(att => ({
@@ -108,6 +111,8 @@ async function getMessageById(accessToken, messageId) {
       isInline: !!att.cid,
       contentBytes: att.content.toString('base64'),
     }));
+
+    console.log(`📎 Processed attachments:`, attachments);
 
     return {
       id: messageId,

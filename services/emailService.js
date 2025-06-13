@@ -173,6 +173,47 @@ class EmailService {
       throw error;
     }
   }
+
+  async deleteMessage(appUserId, email, messageId) {
+    try {
+      // Get the message to check its folder and read status
+      const message = await Email.findOne({ id: messageId });
+      if (!message) {
+        throw new Error('Message not found');
+      }
+
+      // Delete the message
+      await Email.deleteOne({ id: messageId });
+
+      // Update folder counts
+      if (message.folder) {
+        const folder = await Email.findOne({ folder: message.folder });
+        if (folder) {
+          const totalCount = await Email.countDocuments({ folder: message.folder });
+          const unreadCount = await Email.countDocuments({ 
+            folder: message.folder,
+            read: false 
+          });
+
+          // Update folder counts in the database
+          await Email.updateMany(
+            { folder: message.folder },
+            { 
+              $set: {
+                folderTotalCount: totalCount,
+                folderUnreadCount: unreadCount
+              }
+            }
+          );
+        }
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error deleting message:', error);
+      throw error;
+    }
+  }
 }
 
 export default new EmailService(); 
