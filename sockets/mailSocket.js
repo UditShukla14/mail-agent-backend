@@ -26,6 +26,34 @@ export const initMailSocket = (socket, io) => {
     io.emit('mail:enrichmentUpdate', data);
   });
 
+  // New handler for enriching specific emails
+  socket.on('mail:enrichEmails', async ({ appUserId, email, messageIds }) => {
+    try {
+      console.log('🔄 Enrichment requested for messages:', messageIds);
+      
+      // Get the messages that need enrichment
+      const messages = await Email.find({ id: { $in: messageIds } });
+      
+      if (messages.length === 0) {
+        console.log('❌ No messages found for enrichment');
+        return;
+      }
+
+      // Filter out already enriched messages
+      const messagesNeedingEnrichment = messages.filter(msg => !msg.aiMeta?.enrichedAt);
+      
+      if (messagesNeedingEnrichment.length > 0) {
+        console.log(`🔄 Starting enrichment for ${messagesNeedingEnrichment.length} messages`);
+        await enrichmentQueueService.addToQueue(messagesNeedingEnrichment);
+      } else {
+        console.log('✅ All messages are already enriched');
+      }
+    } catch (error) {
+      console.error('❌ Error in mail:enrichEmails:', error);
+      socket.emit('mail:error', 'Failed to start enrichment process');
+    }
+  });
+
   // 📥 INIT
   socket.on('mail:init', async ({ appUserId, email }) => {
     // Store appUserId on socket for later use
@@ -142,30 +170,8 @@ export const initMailSocket = (socket, io) => {
         nextLink: newNextLink
       });
 
-      // Start enrichment in background with batch processing
-      if (validMessages.length > 0) {
-        try {
-          // Filter out already enriched messages before adding to queue
-          const messagesNeedingEnrichment = validMessages.filter(msg => {
-            // Skip if message has been enriched (has enrichedAt timestamp)
-            if (msg.aiMeta?.enrichedAt) {
-              console.log(`⏭️ Skipping already enriched message ${msg.id} (enriched at: ${msg.aiMeta.enrichedAt})`);
-              return false;
-            }
-            return true;
-          });
-
-          if (messagesNeedingEnrichment.length > 0) {
-            console.log(`🔄 Starting batch enrichment for ${messagesNeedingEnrichment.length} unenriched messages`);
-            await enrichmentQueueService.addToQueue(messagesNeedingEnrichment);
-          } else {
-            console.log('✅ All messages are already enriched, skipping enrichment process');
-          }
-        } catch (error) {
-          console.error('❌ Failed to start enrichment process:', error);
-          socket.emit('mail:error', 'Failed to start enrichment process');
-        }
-      }
+      // Remove automatic enrichment for all messages
+      // Enrichment will now only happen when specifically requested from enriched email list
     } catch (error) {
       console.error('❌ Error in mail:getFolder:', error);
       socket.emit('mail:error', 'Failed to process folder request');
