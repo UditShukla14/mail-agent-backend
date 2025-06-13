@@ -16,6 +16,7 @@ import emailEnrichmentService from '../services/emailEnrichment.js';
 import enrichmentQueueService from '../services/enrichmentQueueService.js';
 import axios from 'axios';
 import emailService from '../services/emailService.js';
+import outlookService from '../services/outlookService.js';
 
 export const initMailSocket = (socket, io) => {
   console.log(`📬 Mail socket connected: ${socket.id}`);
@@ -182,42 +183,26 @@ export const initMailSocket = (socket, io) => {
 
   // 📧 Full message
   socket.on('mail:getMessage', async ({ appUserId, email, messageId }) => {
-    const token = await getToken(appUserId, email, 'outlook');
-    if (!token) return socket.emit('mail:error', 'Token not found');
+    console.log(`[Debug] Getting message ${messageId} for ${email}`);
+    try {
+      const token = await getToken(appUserId, email, 'outlook');
+      if (!token) return socket.emit('mail:error', 'Token not found');
 
-    const message = await getMessageById(token, messageId);
-    if (message) {
-      // Get user from database
-      const user = await User.findOne({ appUserId });
-      if (!user) {
-        socket.emit('mail:error', 'User not found');
-        return;
+      const message = await outlookService.getMessageById(token, messageId);
+      console.log('[Debug] Message details being sent:', {
+        id: message.id,
+        hasAttachments: message.attachments?.length > 0,
+        attachmentCount: message.attachments?.length
+      });
+
+      if (message) {
+        socket.emit('mail:message', message);
+      } else {
+        socket.emit('mail:error', 'Message not found');
       }
-
-      // Save or update message in database
-      const savedMessage = await Email.findOneAndUpdate(
-        { id: message.id },
-        { 
-          $set: {
-            ...message,
-            userId: user._id,
-            email: email
-          }
-        },
-        { upsert: true, new: true }
-      );
-
-      socket.emit('mail:message', savedMessage);
-      
-      // Start enrichment in background
-      try {
-        await emailEnrichmentService.enrichEmail(savedMessage);
-      } catch (error) {
-        console.error('Failed to enrich message:', error);
-        socket.emit('mail:error', 'Failed to enrich message');
-      }
-    } else {
-      socket.emit('mail:error', 'Message not found');
+    } catch (error) {
+      console.error('Failed to get message:', error);
+      socket.emit('mail:error', error.message);
     }
   });
 
