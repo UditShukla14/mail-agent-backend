@@ -10,7 +10,9 @@ async function sendEmail(accessToken, { to, subject = '', body, cc, bcc }) {
         content: body
       },
       toRecipients: to
-        ? [{ emailAddress: { address: to } }]
+        ? to.split(',').map(addr => ({
+            emailAddress: { address: addr.trim() }
+          }))
         : [],
       ccRecipients: cc
         ? cc.split(',').map(addr => ({

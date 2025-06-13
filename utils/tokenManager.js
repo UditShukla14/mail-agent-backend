@@ -7,15 +7,60 @@ import CryptoJS from 'crypto-js';
 dotenv.config();
 const ENCRYPTION_KEY = process.env.TOKEN_ENCRYPTION_KEY;
 
+if (!ENCRYPTION_KEY) {
+  console.error('❌ TOKEN_ENCRYPTION_KEY is not defined in environment variables');
+  process.exit(1);
+}
+
+// Create a derived key using PBKDF2
+const deriveKey = (key) => {
+  const salt = CryptoJS.enc.Utf8.parse('mail-agent-salt');
+  return CryptoJS.PBKDF2(key, salt, {
+    keySize: 256 / 32,
+    iterations: 1000
+  });
+};
+
+const derivedKey = deriveKey(ENCRYPTION_KEY);
+
 // 🔐 Encrypt any value using AES
 const encrypt = (text) => {
-  return CryptoJS.AES.encrypt(text, ENCRYPTION_KEY).toString();
+  try {
+    if (!text) {
+      console.error('❌ Attempted to encrypt null or undefined value');
+      return null;
+    }
+    const encrypted = CryptoJS.AES.encrypt(text, derivedKey, {
+      mode: CryptoJS.mode.ECB,
+      padding: CryptoJS.pad.Pkcs7
+    });
+    return encrypted.toString();
+  } catch (error) {
+    console.error('❌ Encryption failed:', error);
+    return null;
+  }
 };
 
 // 🔐 Decrypt AES-encrypted value
 const decrypt = (cipherText) => {
-  const bytes = CryptoJS.AES.decrypt(cipherText, ENCRYPTION_KEY);
-  return bytes.toString(CryptoJS.enc.Utf8);
+  try {
+    if (!cipherText) {
+      console.error('❌ Attempted to decrypt null or undefined value');
+      return null;
+    }
+    const bytes = CryptoJS.AES.decrypt(cipherText, derivedKey, {
+      mode: CryptoJS.mode.ECB,
+      padding: CryptoJS.pad.Pkcs7
+    });
+    const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+    if (!decrypted) {
+      throw new Error('Decryption resulted in empty string');
+    }
+    return decrypted;
+  } catch (error) {
+    console.error('❌ Decryption failed:', error);
+    return null;
+  }
 };
 
 // 🔁 Get valid access_token or refresh if expired
@@ -30,7 +75,17 @@ export const getToken = async (appUserId, email, provider) => {
 
     console.log(`✅ Token found in DB for ${email}`);
     const access_token = decrypt(tokenDoc.access_token);
+    if (!access_token) {
+      console.error(`❌ Failed to decrypt access token for ${email}`);
+      return null;
+    }
+
     const refresh_token = decrypt(tokenDoc.refresh_token);
+    if (!refresh_token) {
+      console.error(`❌ Failed to decrypt refresh token for ${email}`);
+      return null;
+    }
+
     const { expires_in, timestamp } = tokenDoc;
 
     const isExpired = Date.now() > timestamp + expires_in * 1000 - 60000;
@@ -42,8 +97,16 @@ export const getToken = async (appUserId, email, provider) => {
     console.log(`🔄 Token expired for ${email}, refreshing...`);
     const refreshed = await refreshToken(refresh_token, provider);
     if (refreshed) {
-      tokenDoc.access_token = encrypt(refreshed.access_token);
-      tokenDoc.refresh_token = encrypt(refreshed.refresh_token);
+      const encryptedAccessToken = encrypt(refreshed.access_token);
+      const encryptedRefreshToken = encrypt(refreshed.refresh_token);
+      
+      if (!encryptedAccessToken || !encryptedRefreshToken) {
+        console.error(`❌ Failed to encrypt refreshed tokens for ${email}`);
+        return null;
+      }
+
+      tokenDoc.access_token = encryptedAccessToken;
+      tokenDoc.refresh_token = encryptedRefreshToken;
       tokenDoc.expires_in = refreshed.expires_in;
       tokenDoc.timestamp = refreshed.timestamp;
       await tokenDoc.save();
@@ -65,11 +128,19 @@ export const saveToken = async (appUserId, email, tokenResponse, provider) => {
     console.log(`🔄 Saving token for ${email} (${provider}) with appUserId: ${appUserId}`);
     const { access_token, refresh_token, expires_in } = tokenResponse;
 
+    const encryptedAccessToken = encrypt(access_token);
+    const encryptedRefreshToken = encrypt(refresh_token);
+
+    if (!encryptedAccessToken || !encryptedRefreshToken) {
+      console.error(`❌ Failed to encrypt tokens for ${email}`);
+      return false;
+    }
+
     const encryptedToken = await Token.findOneAndUpdate(
       { appUserId, email, provider },
       {
-        access_token: encrypt(access_token),
-        refresh_token: encrypt(refresh_token),
+        access_token: encryptedAccessToken,
+        refresh_token: encryptedRefreshToken,
         expires_in,
         timestamp: Date.now()
       },

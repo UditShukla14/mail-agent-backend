@@ -16,7 +16,7 @@ import emailEnrichmentService from '../services/emailEnrichment.js';
 import enrichmentQueueService from '../services/enrichmentQueueService.js';
 import axios from 'axios';
 import emailService from '../services/emailService.js';
-import { io } from 'socket.io';
+import { Server } from 'socket.io';
 
 export const initMailSocket = (socket, io) => {
   console.log(`📬 Mail socket connected: ${socket.id}`);

@@ -52,7 +52,7 @@ class EmailEnrichmentService {
       // Find the socket for this user
       const userSocket = this.findUserSocket(user.appUserId);
       if (userSocket) {
-        userSocket.emit('mail:enrichmentUpdate', {
+        userSocket.emit('mail:enrichmentStatus', {
           messageId: email.id,
           status: 'analyzing',
           message: 'Analyzing email content...'
@@ -88,7 +88,7 @@ class EmailEnrichmentService {
 
       // Emit completion status to specific user
       if (userSocket) {
-        userSocket.emit('mail:enrichmentUpdate', {
+        userSocket.emit('mail:enrichmentStatus', {
           messageId: email.id,
           status: 'completed',
           message: 'Analysis complete',
@@ -116,7 +116,7 @@ class EmailEnrichmentService {
       if (user) {
         const userSocket = this.findUserSocket(user.appUserId);
         if (userSocket) {
-          userSocket.emit('mail:enrichmentUpdate', {
+          userSocket.emit('mail:enrichmentStatus', {
             messageId: email.id,
             status: 'error',
             message: error.message
@@ -182,7 +182,7 @@ class EmailEnrichmentService {
           console.log(`✅ Email ${email.id} already enriched`);
           // Emit already enriched status to specific user
           if (userSocket) {
-            userSocket.emit('mail:enrichmentUpdate', {
+            userSocket.emit('mail:enrichmentStatus', {
               messageId: email.id,
               status: 'completed',
               message: 'Already enriched',
@@ -243,7 +243,7 @@ class EmailEnrichmentService {
 
               // Emit success status to specific user
               if (userSocket) {
-                userSocket.emit('mail:enrichmentUpdate', {
+                userSocket.emit('mail:enrichmentStatus', {
                   messageId: email.id,
                   status: 'completed',
                   message: 'Analysis complete',
@@ -254,7 +254,7 @@ class EmailEnrichmentService {
             }
           }));
 
-          // Add delay between batches to avoid rate limits
+          // Add delay between batches only if there are more batches to process
           if (i + batchSize < unenrichedEmails.length) {
             console.log('⏳ Waiting 30 seconds before next batch...');
             await new Promise(resolve => setTimeout(resolve, 30000));
@@ -264,7 +264,7 @@ class EmailEnrichmentService {
           // Emit error to specific user
           if (userSocket) {
             batch.forEach(email => {
-              userSocket.emit('mail:enrichmentUpdate', {
+              userSocket.emit('mail:enrichmentStatus', {
                 messageId: email.id,
                 status: 'error',
                 message: error.message,
