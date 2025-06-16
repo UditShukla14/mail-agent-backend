@@ -420,18 +420,20 @@ To: ${msg.to}
 Content: ${msg.content}
 ---`).join('\n')}
 
-Format the response as a JSON array of objects, where each object has these fields:
+IMPORTANT: Your response must be a valid JSON array of objects. Each object must have these exact fields:
 {
   "summary": "string",
   "category": "string",
   "priority": "string",
   "sentiment": "string",
   "actionItems": ["string"]
-}`;
+}
+
+Do not include any text before or after the JSON array. The response should start with [ and end with ].`;
 
       // Implement retry logic with exponential backoff
       const maxRetries = 3;
-      const baseDelay = 60000; // 1 minute base delay
+      const baseDelay = 60000;
       
       for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
@@ -483,24 +485,44 @@ Format the response as a JSON array of objects, where each object has these fiel
 
           let analyses;
           try {
-            analyses = JSON.parse(data.content[0].text);
+            // Clean the response text to ensure it's valid JSON
+            const cleanedText = data.content[0].text.trim();
+            // Find the first [ and last ] to extract just the JSON array
+            const startIndex = cleanedText.indexOf('[');
+            const endIndex = cleanedText.lastIndexOf(']') + 1;
+            
+            if (startIndex === -1 || endIndex === 0) {
+              throw new Error('No JSON array found in response');
+            }
+            
+            const jsonText = cleanedText.slice(startIndex, endIndex);
+            analyses = JSON.parse(jsonText);
+            
             if (!Array.isArray(analyses)) {
               throw new Error('Response is not an array');
             }
+            
+            // Validate each analysis object
+            analyses = analyses.map(analysis => {
+              if (!analysis || typeof analysis !== 'object') {
+                throw new Error('Invalid analysis object');
+              }
+              return {
+                summary: analysis.summary || 'No summary available',
+                category: analysis.category || 'Other',
+                priority: analysis.priority || 'medium',
+                sentiment: analysis.sentiment || 'neutral',
+                actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
+                version: '1.0'
+              };
+            });
           } catch (parseError) {
             console.error('❌ Failed to parse Claude response:', data.content[0].text);
-            throw new Error('Failed to parse Claude response as JSON array');
+            console.error('Parse error:', parseError);
+            throw new Error('Failed to parse Claude response as JSON array: ' + parseError.message);
           }
 
-          // Validate and normalize each analysis
-          return analyses.map(analysis => ({
-            summary: analysis.summary || 'No summary available',
-            category: analysis.category || 'Other',
-            priority: analysis.priority || 'medium',
-            sentiment: analysis.sentiment || 'neutral',
-            actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
-            version: '1.0'
-          }));
+          return analyses;
         } catch (error) {
           // If this is the last attempt, throw the error
           if (attempt === maxRetries - 1) {

@@ -3,12 +3,14 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser';
 import { initMailSocket } from './sockets/mailSocket.js';
 import connectDB from './utils/db.js';
 
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
 import accountRoutes from './routes/account.js';
+import emailAnalyticsRoutes from './routes/emailAnalytics.js';
 // import mailRoutes from './routes/mail.js';
 
 import './services/enrichmentQueueService.js'; // This will initialize the service
@@ -108,11 +110,13 @@ app.use((req, res, next) => {
 
 // Middleware
 app.use(express.json());
+app.use(cookieParser());
 
 // Routes
 app.use('/user', userRoutes);
 app.use('/auth', authRoutes);
 app.use('/account', accountRoutes);
+app.use('/email-analytics', emailAnalyticsRoutes);
 // app.use('/mail', mailRoutes);
 
 // Health check endpoint
