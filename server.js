@@ -16,6 +16,7 @@ import emailAnalyticsRoutes from './routes/emailAnalytics.js';
 import './services/enrichmentQueueService.js'; // This will initialize the service
 
 dotenv.config();
+console.log('JWT_SECRET loaded:', process.env.JWT_SECRET ? 'Yes' : 'No');
 
 const app = express();
 const httpServer = createServer(app);

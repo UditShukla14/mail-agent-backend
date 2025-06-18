@@ -204,75 +204,107 @@ class EmailEnrichmentService {
 
       console.log(`📧 Found ${unenrichedEmails.length} emails needing enrichment`);
 
-      // Process emails in batches of 5
-      const batchSize = 5;
+      // Process emails in smaller batches to prevent rate limiting
+      const batchSize = 5; // Reduced batch size
+      const maxRetries = 3;
+      const baseDelay = 60000; // 1 minute base delay
+
       for (let i = 0; i < unenrichedEmails.length; i += batchSize) {
         const batch = unenrichedEmails.slice(i, i + batchSize);
         console.log(`🔄 Processing batch of ${batch.length} emails`);
 
-        try {
-          // Get full message content for each email in batch
-          const messages = await Promise.all(batch.map(async (email) => {
-            const user = await User.findById(email.userId);
-            if (!user) {
-              throw new Error('User not found');
-            }
-            return emailService.getMessage(user.appUserId, email.email, email.id);
-          }));
+        let retryCount = 0;
+        let success = false;
 
-          // Generate batch analysis
-          const analyses = await this.generateBatchAnalysis(messages);
+        while (!success && retryCount < maxRetries) {
+          try {
+            // Get full message content for each email in batch
+            const messages = await Promise.all(batch.map(async (email) => {
+              const user = await User.findById(email.userId);
+              if (!user) {
+                throw new Error('User not found');
+              }
+              return emailService.getMessage(user.appUserId, email.email, email.id);
+            }));
 
-          // Update each email with its analysis
-          await Promise.all(batch.map(async (email, index) => {
-            const analysis = analyses[index];
-            if (analysis) {
-              const updatedEmail = await Email.findByIdAndUpdate(
-                email._id,
-                {
-                  aiMeta: {
-                    ...analysis,
-                    enrichedAt: new Date(),
-                    error: null,
-                    version: '1.0'
+            // Generate batch analysis
+            const analyses = await this.generateBatchAnalysis(messages);
+
+            // Update each email with its analysis
+            await Promise.all(batch.map(async (email, index) => {
+              const analysis = analyses[index];
+              if (analysis) {
+                const updatedEmail = await Email.findByIdAndUpdate(
+                  email._id,
+                  {
+                    aiMeta: {
+                      ...analysis,
+                      enrichedAt: new Date(),
+                      error: null,
+                      version: '1.0'
+                    },
+                    isProcessed: true
                   },
-                  isProcessed: true
-                },
-                { new: true }
-              );
+                  { new: true }
+                );
 
-              // Emit success status to specific user
-              if (userSocket) {
+                // Emit success status to specific user
+                if (userSocket) {
+                  userSocket.emit('mail:enrichmentStatus', {
+                    messageId: email.id,
+                    status: 'completed',
+                    message: 'Analysis complete',
+                    aiMeta: analysis,
+                    email: updatedEmail
+                  });
+                }
+              }
+            }));
+
+            success = true;
+            console.log(`✅ Successfully processed batch of ${batch.length} emails`);
+
+          } catch (error) {
+            retryCount++;
+            console.error(`❌ Error processing batch (attempt ${retryCount}/${maxRetries}):`, error);
+
+            // Emit error to specific user
+            if (userSocket) {
+              batch.forEach(email => {
                 userSocket.emit('mail:enrichmentStatus', {
                   messageId: email.id,
-                  status: 'completed',
-                  message: 'Analysis complete',
-                  aiMeta: analysis,
-                  email: updatedEmail
+                  status: 'error',
+                  message: `Error processing email (attempt ${retryCount}/${maxRetries}): ${error.message}`,
+                  error: true
                 });
-              }
-            }
-          }));
-
-          // Add delay between batches only if there are more batches to process
-          if (i + batchSize < unenrichedEmails.length) {
-            console.log('⏳ Waiting 30 seconds before next batch...');
-            await new Promise(resolve => setTimeout(resolve, 30000));
-          }
-        } catch (error) {
-          console.error('❌ Error processing batch:', error);
-          // Emit error to specific user
-          if (userSocket) {
-            batch.forEach(email => {
-              userSocket.emit('mail:enrichmentStatus', {
-                messageId: email.id,
-                status: 'error',
-                message: error.message,
-                error: true
               });
-            });
+            }
+
+            if (retryCount < maxRetries) {
+              const delay = baseDelay * Math.pow(2, retryCount - 1); // Exponential backoff
+              console.log(`⏳ Waiting ${delay/1000} seconds before retry ${retryCount}/${maxRetries}...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+              // Update emails with error status after all retries failed
+              await Promise.all(batch.map(async (email) => {
+                await Email.findByIdAndUpdate(email._id, {
+                  $set: {
+                    'aiMeta.error': `Failed after ${maxRetries} attempts: ${error.message}`,
+                    'aiMeta.enrichedAt': new Date(),
+                    'aiMeta.version': '1.0',
+                    isProcessed: false
+                  }
+                });
+              }));
+            }
           }
-          // Continue with next batch even if one fails
+        }
+
+        // Add delay between batches to prevent rate limiting
+        if (i + batchSize < unenrichedEmails.length) {
+          const delay = 10000; // 10 seconds delay between batches
+          console.log(`⏳ Waiting ${delay/1000} seconds before next batch...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
 
@@ -291,6 +323,14 @@ class EmailEnrichmentService {
       // Extract relevant information from the message
       const { subject, content, from, to } = message;
       
+      // Get user's categories
+      const user = await User.findById(message.userId);
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      const categories = user.categories.map(c => c.name).join(', ');
+      
       // Prepare the prompt for AI analysis
       const prompt = `Analyze this email and provide insights:
 Subject: ${subject}
@@ -300,7 +340,7 @@ Content: ${content}
 
 Please provide:
 1. A brief summary (2-3 sentences)
-2. The category (Work, Personal, Finance, Shopping, Travel, Social, Newsletter, Marketing, Important Documents, Other)
+2. The category (must be one of: ${categories})
 3. Priority level (urgent, high, medium, low)
 4. Sentiment (positive, negative, neutral)
 5. Key action items or next steps (if any)
@@ -403,10 +443,19 @@ Format the response as a JSON object with these fields:
 
   async generateBatchAnalysis(messages) {
     try {
+      // Get user's categories from the first message
+      const firstMessage = messages[0];
+      const user = await User.findById(firstMessage.userId);
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      const categories = user.categories.map(c => c.name).join(', ');
+
       // Prepare batch prompt
       const batchPrompt = `Analyze these emails and provide insights for each one. For each email, provide:
 1. A brief summary (2-3 sentences)
-2. The category (Work, Personal, Finance, Shopping, Travel, Social, Newsletter, Marketing, Important Documents, Other)
+2. The category (must be one of: ${categories})
 3. Priority level (urgent, high, medium, low)
 4. Sentiment (positive, negative, neutral)
 5. Key action items or next steps (if any)
@@ -429,7 +478,34 @@ IMPORTANT: Your response must be a valid JSON array of objects. Each object must
   "actionItems": ["string"]
 }
 
-Do not include any text before or after the JSON array. The response should start with [ and end with ].`;
+CRITICAL FORMATTING RULES:
+1. The response must start with [ and end with ]
+2. Each object must be separated by a comma
+3. All property names must be in double quotes
+4. All string values must be in double quotes
+5. The actionItems array must be an array of strings
+6. Do not include any text before or after the JSON array
+7. Do not include any comments or explanations
+8. Ensure all quotes are properly escaped
+9. Do not include trailing commas
+
+Example of valid response format:
+[
+  {
+    "summary": "Meeting scheduled for project review",
+    "category": "Meeting",
+    "priority": "high",
+    "sentiment": "neutral",
+    "actionItems": ["Prepare presentation", "Review project timeline"]
+  },
+  {
+    "summary": "New feature request from client",
+    "category": "Feature Request",
+    "priority": "medium",
+    "sentiment": "positive",
+    "actionItems": ["Evaluate feasibility", "Create timeline"]
+  }
+]`;
 
       // Implement retry logic with exponential backoff
       const maxRetries = 3;
@@ -487,6 +563,7 @@ Do not include any text before or after the JSON array. The response should star
           try {
             // Clean the response text to ensure it's valid JSON
             const cleanedText = data.content[0].text.trim();
+            
             // Find the first [ and last ] to extract just the JSON array
             const startIndex = cleanedText.indexOf('[');
             const endIndex = cleanedText.lastIndexOf(']') + 1;
@@ -496,22 +573,45 @@ Do not include any text before or after the JSON array. The response should star
             }
             
             const jsonText = cleanedText.slice(startIndex, endIndex);
-            analyses = JSON.parse(jsonText);
+            
+            // Try to parse the JSON with better error handling
+            try {
+              analyses = JSON.parse(jsonText);
+            } catch (parseError) {
+              // If parsing fails, try to fix common JSON formatting issues
+              const fixedJsonText = jsonText
+                .replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3') // Add quotes to unquoted keys
+                .replace(/(\w+)(\s*:)/g, '"$1"$2') // Add quotes to any remaining unquoted keys
+                .replace(/'/g, '"') // Replace single quotes with double quotes
+                .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
+                .replace(/([^\\])"/g, '$1\\"') // Escape unescaped quotes
+                .replace(/\\"/g, '"'); // Fix double escaped quotes
+              
+              try {
+                analyses = JSON.parse(fixedJsonText);
+              } catch (secondParseError) {
+                console.error('❌ Failed to parse even after fixing JSON:', fixedJsonText);
+                throw new Error('Failed to parse response as JSON even after fixing common issues');
+              }
+            }
             
             if (!Array.isArray(analyses)) {
               throw new Error('Response is not an array');
             }
             
             // Validate each analysis object
-            analyses = analyses.map(analysis => {
+            analyses = analyses.map((analysis, index) => {
               if (!analysis || typeof analysis !== 'object') {
-                throw new Error('Invalid analysis object');
+                console.error(`❌ Invalid analysis object at index ${index}:`, analysis);
+                throw new Error(`Invalid analysis object at index ${index}`);
               }
+              
+              // Ensure all required fields exist with proper types
               return {
-                summary: analysis.summary || 'No summary available',
-                category: analysis.category || 'Other',
-                priority: analysis.priority || 'medium',
-                sentiment: analysis.sentiment || 'neutral',
+                summary: typeof analysis.summary === 'string' ? analysis.summary : 'No summary available',
+                category: typeof analysis.category === 'string' ? analysis.category : 'Other',
+                priority: typeof analysis.priority === 'string' ? analysis.priority : 'medium',
+                sentiment: typeof analysis.sentiment === 'string' ? analysis.sentiment : 'neutral',
                 actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
                 version: '1.0'
               };

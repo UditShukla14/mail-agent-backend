@@ -19,19 +19,7 @@ const emailSchema = new mongoose.Schema({
   aiMeta: {
     summary: { type: String },
     category: { 
-      type: String, 
-      enum: [
-        'Work',
-        'Personal',
-        'Finance',
-        'Shopping',
-        'Travel',
-        'Social',
-        'Newsletter',
-        'Marketing',
-        'Important Documents',
-        'Other'
-      ],
+      type: String,
       default: 'Other'
     },
     priority: {

@@ -2,10 +2,18 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
 import { saveToken, getToken } from '../utils/tokenManager.js';
+import { google } from 'googleapis';
 
 dotenv.config();
 
-const { CLIENT_ID, CLIENT_SECRET, REDIRECT_URI } = process.env;
+const { 
+  CLIENT_ID, 
+  CLIENT_SECRET, 
+  REDIRECT_URI,
+  GMAIL_CLIENT_ID,
+  GMAIL_CLIENT_SECRET,
+  GMAIL_REDIRECT_URI 
+} = process.env;
 
 // 1️⃣ Redirect to Microsoft Login
 export const outlookLogin = (req, res) => {
@@ -124,6 +132,150 @@ export const outlookRedirect = async (req, res) => {
     `);
   } catch (err) {
     console.error('❌ Outlook OAuth error:', err?.response?.data || err.message);
+
+    if (callbackUrl) {
+      const redirectUrl = new URL(callbackUrl);
+      redirectUrl.searchParams.set('error', 'oauth_failed');
+      redirectUrl.searchParams.set('error_details', err?.response?.data?.error_description || err.message);
+      return res.redirect(redirectUrl.toString());
+    }
+
+    res.status(500).send(`
+      <html>
+        <head>
+          <title>Connection Failed</title>
+          <style>
+            body { font-family: system-ui, -apple-system, sans-serif; text-align: center; padding: 2rem; }
+            .error { color: #ef4444; font-size: 1.5rem; margin-bottom: 1rem; }
+            .message { color: #64748b; }
+          </style>
+        </head>
+        <body>
+          <div class="error">❌ Connection Failed</div>
+          <div class="message">Please try again or contact support if the problem persists.</div>
+        </body>
+      </html>
+    `);
+  }
+};
+
+// Gmail OAuth Functions
+export const gmailLogin = (req, res) => {
+  const { appUserId, callbackUrl } = req.query;
+  if (!appUserId) return res.status(400).send('Missing appUserId');
+
+  const oauth2Client = new google.auth.OAuth2(
+    GMAIL_CLIENT_ID,
+    GMAIL_CLIENT_SECRET,
+    GMAIL_REDIRECT_URI
+  );
+
+  const scopes = [
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/gmail.send',
+    'https://www.googleapis.com/auth/gmail.modify',
+    'https://www.googleapis.com/auth/userinfo.email',
+    'https://www.googleapis.com/auth/userinfo.profile'
+  ];
+
+  const statePayload = Buffer.from(JSON.stringify({ appUserId, callbackUrl })).toString('base64');
+  const authUrl = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: scopes,
+    state: statePayload,
+    prompt: 'consent'
+  });
+
+  res.redirect(authUrl);
+};
+
+export const gmailRedirect = async (req, res) => {
+  const code = req.query.code;
+  let state;
+
+  try {
+    state = JSON.parse(Buffer.from(req.query.state, 'base64').toString());
+  } catch (err) {
+    return res.status(400).send('Invalid state parameter');
+  }
+
+  const { appUserId, callbackUrl } = state;
+
+  if (!code || !appUserId) {
+    return res.status(400).send('Missing code or appUserId');
+  }
+
+  try {
+    console.log('🔄 Exchanging code for Gmail token...');
+    const oauth2Client = new google.auth.OAuth2(
+      GMAIL_CLIENT_ID,
+      GMAIL_CLIENT_SECRET,
+      GMAIL_REDIRECT_URI
+    );
+
+    const { tokens } = await oauth2Client.getToken(code);
+    const { access_token, refresh_token, expiry_date } = tokens;
+    console.log('✅ Token received from Google');
+
+    console.log('🔄 Fetching user profile...');
+    const oauth2 = google.oauth2({
+      auth: oauth2Client,
+      version: 'v2'
+    });
+
+    const profile = await oauth2.userinfo.get();
+    const email = profile.data.email;
+    console.log(`✅ User profile fetched: ${email}`);
+
+    console.log('🔄 Saving tokens...');
+    const saved = await saveToken(appUserId, email, {
+      access_token,
+      refresh_token,
+      expires_in: Math.floor((expiry_date - Date.now()) / 1000)
+    }, 'gmail');
+
+    if (!saved) {
+      throw new Error('Failed to save token');
+    }
+    console.log('✅ Tokens saved successfully');
+
+    console.log('🔄 Verifying token...');
+    const token = await getToken(appUserId, email, 'gmail');
+    if (!token) {
+      throw new Error('Token verification failed');
+    }
+    console.log('✅ Token verified');
+
+    if (callbackUrl) {
+      const redirectUrl = new URL(callbackUrl);
+      redirectUrl.searchParams.set('provider', 'gmail');
+      redirectUrl.searchParams.set('appUserId', appUserId);
+      redirectUrl.searchParams.set('email', email);
+      redirectUrl.searchParams.set('success', 'true');
+      return res.redirect(redirectUrl.toString());
+    }
+
+    res.send(`
+      <html>
+        <head>
+          <title>Account Connected</title>
+          <style>
+            body { font-family: system-ui, -apple-system, sans-serif; text-align: center; padding: 2rem; }
+            .success { color: #22c55e; font-size: 1.5rem; margin-bottom: 1rem; }
+            .message { color: #64748b; }
+          </style>
+        </head>
+        <body>
+          <div class="success">✅ Account Connected Successfully</div>
+          <div class="message">You can now close this window and return to the dashboard.</div>
+          <script>
+            setTimeout(() => window.close(), 2000);
+          </script>
+        </body>
+      </html>
+    `);
+  } catch (err) {
+    console.error('❌ Gmail OAuth error:', err?.response?.data || err.message);
 
     if (callbackUrl) {
       const redirectUrl = new URL(callbackUrl);
