@@ -88,6 +88,7 @@ class EmailEnrichmentService {
 
       // Emit completion status to specific user
       if (userSocket) {
+        console.log(`📤 Emitting enrichment status for message ${email.id} to socket ${userSocket.id}`);
         userSocket.emit('mail:enrichmentStatus', {
           messageId: email.id,
           status: 'completed',
@@ -95,6 +96,8 @@ class EmailEnrichmentService {
           aiMeta: cleanedAnalysis,
           email: updatedEmail
         });
+      } else {
+        console.log(`❌ No user socket found for message ${email.id}`);
       }
 
       console.log('✅ Email enrichment completed:', email.id);
@@ -130,13 +133,30 @@ class EmailEnrichmentService {
 
   // Helper method to find a user's socket
   findUserSocket(appUserId) {
-    if (!this.io) return null;
+    if (!this.io) {
+      console.log('❌ IO instance not set in emailEnrichmentService');
+      return null;
+    }
     
     // Get all connected sockets
     const sockets = Array.from(this.io.sockets.sockets.values());
+    console.log(`🔍 Looking for socket with appUserId: ${appUserId}`);
+    console.log(`🔍 Found ${sockets.length} connected sockets`);
     
     // Find the socket that has this appUserId
-    return sockets.find(socket => socket.appUserId === appUserId);
+    const userSocket = sockets.find(socket => socket.appUserId === appUserId);
+    
+    if (userSocket) {
+      console.log(`✅ Found socket for user ${appUserId}: ${userSocket.id}`);
+    } else {
+      console.log(`❌ No socket found for user ${appUserId}`);
+      // Log all socket appUserIds for debugging
+      sockets.forEach(socket => {
+        console.log(`🔍 Socket ${socket.id} has appUserId: ${socket.appUserId}`);
+      });
+    }
+    
+    return userSocket;
   }
 
   async enrichBatch(emails, socket) {
@@ -250,6 +270,7 @@ class EmailEnrichmentService {
 
                 // Emit success status to specific user
                 if (userSocket) {
+                  console.log(`📤 Emitting enrichment status for message ${email.id} to socket ${userSocket.id}`);
                   userSocket.emit('mail:enrichmentStatus', {
                     messageId: email.id,
                     status: 'completed',
@@ -257,6 +278,8 @@ class EmailEnrichmentService {
                     aiMeta: analysis,
                     email: updatedEmail
                   });
+                } else {
+                  console.log(`❌ No user socket found for message ${email.id}`);
                 }
               }
             }));
@@ -323,24 +346,34 @@ class EmailEnrichmentService {
       // Extract relevant information from the message
       const { subject, content, from, to } = message;
       
-      // Get user's categories
+      // Get user's categories with new format
       const user = await User.findById(message.userId);
       if (!user) {
         throw new Error('User not found');
       }
 
-      const categories = user.categories.map(c => c.name).join(', ');
+      // Create detailed category information for AI
+      const categoryInfo = user.categories.map(cat => 
+        `- ${cat.name}: ${cat.description}`
+      ).join('\n');
       
-      // Prepare the prompt for AI analysis
+      const categoryNames = user.categories.map(c => c.name).join(', ');
+      
+      // Prepare the prompt for AI analysis with enhanced category context
       const prompt = `Analyze this email and provide insights:
+
+Email Details:
 Subject: ${subject}
 From: ${from}
 To: ${to}
 Content: ${content}
 
+Available Categories (choose the most appropriate one):
+${categoryInfo}
+
 Please provide:
 1. A brief summary (2-3 sentences)
-2. The category (must be one of: ${categories})
+2. The category (must be one of: ${categoryNames})
 3. Priority level (urgent, high, medium, low)
 4. Sentiment (positive, negative, neutral)
 5. Key action items or next steps (if any)
@@ -450,12 +483,22 @@ Format the response as a JSON object with these fields:
         throw new Error('User not found');
       }
 
-      const categories = user.categories.map(c => c.name).join(', ');
+      // Create detailed category information for AI
+      const categoryInfo = user.categories.map(cat => 
+        `- ${cat.name}: ${cat.description}`
+      ).join('\n');
+      
+      const categoryNames = user.categories.map(c => c.name).join(', ');
 
-      // Prepare batch prompt
-      const batchPrompt = `Analyze these emails and provide insights for each one. For each email, provide:
+      // Prepare batch prompt with enhanced category context
+      const batchPrompt = `Analyze these emails and provide insights for each one. 
+
+Available Categories (choose the most appropriate one for each email):
+${categoryInfo}
+
+For each email, provide:
 1. A brief summary (2-3 sentences)
-2. The category (must be one of: ${categories})
+2. The category (must be one of: ${categoryNames})
 3. Priority level (urgent, high, medium, low)
 4. Sentiment (positive, negative, neutral)
 5. Key action items or next steps (if any)
@@ -493,14 +536,14 @@ Example of valid response format:
 [
   {
     "summary": "Meeting scheduled for project review",
-    "category": "Meeting",
+    "category": "time_sensitive_calendar",
     "priority": "high",
     "sentiment": "neutral",
     "actionItems": ["Prepare presentation", "Review project timeline"]
   },
   {
     "summary": "New feature request from client",
-    "category": "Feature Request",
+    "category": "customer_sales_ops",
     "priority": "medium",
     "sentiment": "positive",
     "actionItems": ["Evaluate feasibility", "Create timeline"]

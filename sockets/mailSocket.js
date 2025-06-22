@@ -338,6 +338,52 @@ export const initMailSocket = (socket, io) => {
     }
   });
 
+  // 🏷️ Update email category
+  socket.on('mail:updateCategory', async ({ appUserId, email, messageId, category }) => {
+    try {
+      console.log('🏷️ Update category requested:', { appUserId, email, messageId, category });
+      
+      // Get user to verify they exist
+      const user = await User.findOne({ appUserId });
+      if (!user) {
+        console.error('❌ User not found:', appUserId);
+        return socket.emit('mail:error', 'User not found');
+      }
+
+      // Find the email document
+      const emailDoc = await Email.findOne({ id: messageId, userId: user._id });
+      if (!emailDoc) {
+        console.error('❌ Email not found:', messageId);
+        return socket.emit('mail:error', 'Email not found');
+      }
+
+      // Update the category in the database
+      const updatedEmail = await Email.findByIdAndUpdate(
+        emailDoc._id,
+        {
+          $set: {
+            'aiMeta.category': category,
+            updatedAt: new Date()
+          }
+        },
+        { new: true }
+      );
+
+      console.log('✅ Category updated successfully:', { messageId, category });
+
+      // Emit success event back to client
+      socket.emit('mail:categoryUpdated', { 
+        messageId, 
+        category,
+        aiMeta: updatedEmail.aiMeta 
+      });
+
+    } catch (error) {
+      console.error('❌ Error updating category:', error);
+      socket.emit('mail:error', 'Failed to update category: ' + error.message);
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log(`❌ Mail socket disconnected: ${socket.id}`);
   });

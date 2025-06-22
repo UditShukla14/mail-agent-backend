@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 import { initMailSocket } from './sockets/mailSocket.js';
 import connectDB from './utils/db.js';
+import emailEnrichmentService from './services/emailEnrichment.js';
 
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
@@ -94,6 +95,9 @@ const io = new Server(httpServer, {
     secure: true
   }
 });
+
+// Set the IO instance for the email enrichment service
+emailEnrichmentService.setIO(io);
 
 // Add a middleware to handle WebSocket upgrade requests
 app.use((req, res, next) => {

@@ -119,6 +119,8 @@ async function getMessageById(accessToken, messageId) {
     return {
       id: messageId,
       from: `${parsed.from?.text || ''}`,
+      to: `${parsed.to?.text || ''}`,
+      cc: `${parsed.cc?.text || ''}`,
       subject: parsed.subject || '',
       content: parsed.html || parsed.textAsHtml || '',
       timestamp: parsed.date?.toISOString() || new Date().toISOString(),
