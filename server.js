@@ -26,9 +26,11 @@ const httpServer = createServer(app);
 
 // CORS configuration
 const allowedOrigins = [
-  'https://mail-agent-frontend.vercel.app',
-  'https://mail-agent-frontend-4hbx1esee-uditshuklas-projects.vercel.app',
-  'http://localhost:3000'
+  // 'https://mail-agent-frontend.vercel.app',
+  // 'https://mail-agent-frontend-4hbx1esee-uditshuklas-projects.vercel.app',
+  'http://localhost:3000',
+  'https://xmail.worxstream.io',
+  // 'https://mails.worxstream.io'
 ];
 
 const corsOptions = {
