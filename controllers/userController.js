@@ -26,12 +26,25 @@ export const registerUser = async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    const isProduction = process.env.NODE_ENV === 'production';
+    const cookieDomain = isProduction ? '.worxstream.io' : undefined;
+    const cookieSameSite = isProduction ? 'none' : 'lax';
+
     // Set the token as an HTTP-only cookie for cross-site usage
     res.cookie('token', token, {
       httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      domain: '.worxstream.io',
+      secure: isProduction, // true in production, false in dev
+      sameSite: cookieSameSite,
+      domain: cookieDomain,
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+    // Set the appUserId as a cookie for middleware auth
+    res.cookie('appUserId', user.appUserId, {
+      httpOnly: false, // Can be read by the browser if needed
+      secure: isProduction,
+      sameSite: cookieSameSite,
+      domain: cookieDomain,
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
@@ -66,12 +79,25 @@ export const loginUser = async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    const isProduction = process.env.NODE_ENV === 'production';
+    const cookieDomain = isProduction ? '.worxstream.io' : undefined;
+    const cookieSameSite = isProduction ? 'none' : 'lax';
+
     // Set the token as an HTTP-only cookie for cross-site usage
     res.cookie('token', token, {
       httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      domain: '.worxstream.io',
+      secure: isProduction, // true in production, false in dev
+      sameSite: cookieSameSite,
+      domain: cookieDomain,
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+    // Set the appUserId as a cookie for middleware auth
+    res.cookie('appUserId', user.appUserId, {
+      httpOnly: false, // Can be read by the browser if needed
+      secure: isProduction,
+      sameSite: cookieSameSite,
+      domain: cookieDomain,
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
