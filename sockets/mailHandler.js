@@ -1,5 +1,5 @@
-const emailService = require('../services/email');
-const emailEnrichmentService = require('../services/emailEnrichment');
+import emailService from '../services/emailService.js';
+
 
 class MailHandler {
   constructor(io) {
@@ -28,9 +28,8 @@ class MailHandler {
       });
       console.log('Emitted mail:folderMessages event');
 
-      // Start enriching emails in the background
-      console.log('Starting background enrichment process');
-      emailEnrichmentService.enrichBatch(messages, socket);
+      // Remove automatic enrichment - let the frontend request enrichment when needed
+      console.log('Skipping automatic enrichment - will be handled by frontend requests');
     } catch (error) {
       console.error('Error getting folder messages:', error);
       socket.emit('error', { message: 'Failed to get folder messages' });
@@ -49,9 +48,8 @@ class MailHandler {
       socket.emit('mail:message', message);
       console.log('Emitted mail:message event');
 
-      // Enrich the full message content
-      console.log('Starting message enrichment');
-      emailEnrichmentService.enrichEmail(message, socket);
+      // Remove automatic enrichment - let the frontend request enrichment when needed
+      console.log('Skipping automatic enrichment - will be handled by frontend requests');
     } catch (error) {
       console.error('Error getting message:', error);
       socket.emit('error', { message: 'Failed to get message' });
@@ -93,4 +91,4 @@ class MailHandler {
   }
 }
 
-module.exports = MailHandler; 
+export default MailHandler; 

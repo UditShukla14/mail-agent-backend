@@ -2,6 +2,7 @@ import Email from '../models/email.js';
 import emailService from './emailService.js';
 import enrichmentQueueService from './enrichmentQueueService.js';
 import User from '../models/User.js';
+import EmailAccount from '../models/EmailAccount.js';
 
 class EmailEnrichmentService {
   constructor() {
@@ -196,9 +197,9 @@ class EmailEnrichmentService {
           continue;
         }
 
-        // Check if already enriched
+        // Check if already enriched - use database check instead of in-memory
         const existingEmail = await Email.findById(email._id);
-        if (existingEmail?.aiMeta?.enrichedAt && !existingEmail?.aiMeta?.error) {
+        if (existingEmail?.aiMeta?.enrichedAt && !existingEmail?.aiMeta?.error && existingEmail?.isProcessed) {
           console.log(`✅ Email ${email.id} already enriched`);
           // Emit already enriched status to specific user
           if (userSocket) {
@@ -346,18 +347,42 @@ class EmailEnrichmentService {
       // Extract relevant information from the message
       const { subject, content, from, to } = message;
       
-      // Get user's categories with new format
+      console.log('🔍 generateAnalysis - Message:', {
+        userId: message.userId,
+        email: message.email,
+        from: message.from,
+        to: message.to
+      });
+      
+      // Get user and email account for categories
       const user = await User.findById(message.userId);
       if (!user) {
         throw new Error('User not found');
       }
 
+      // Get email account for this specific email (use the user's email address)
+      const emailAccount = await EmailAccount.findOne({ 
+        userId: user._id, 
+        email: message.email 
+      });
+
+      console.log('🔍 generateAnalysis - Email account lookup:', {
+        userId: user._id,
+        email: message.email,
+        found: !!emailAccount,
+        categoriesCount: emailAccount?.categories?.length || 0
+      });
+
+      if (!emailAccount) {
+        throw new Error('Email account not found');
+      }
+
       // Create detailed category information for AI
-      const categoryInfo = user.categories.map(cat => 
+      const categoryInfo = emailAccount.categories.map(cat => 
         `- ${cat.name}: ${cat.description}`
       ).join('\n');
       
-      const categoryNames = user.categories.map(c => c.name).join(', ');
+      const categoryNames = emailAccount.categories.map(c => c.name).join(', ');
       
       // Prepare the prompt for AI analysis with enhanced category context
       const prompt = `Analyze this email and provide insights:
@@ -476,19 +501,43 @@ Format the response as a JSON object with these fields:
 
   async generateBatchAnalysis(messages) {
     try {
-      // Get user's categories from the first message
+      // Get user and email account for categories from the first message
       const firstMessage = messages[0];
+      console.log('🔍 generateBatchAnalysis - First message:', {
+        userId: firstMessage.userId,
+        email: firstMessage.email,
+        from: firstMessage.from,
+        to: firstMessage.to
+      });
+      
       const user = await User.findById(firstMessage.userId);
       if (!user) {
         throw new Error('User not found');
       }
 
+      // Get email account for this specific email (use the user's email address)
+      const emailAccount = await EmailAccount.findOne({ 
+        userId: user._id, 
+        email: firstMessage.email 
+      });
+
+      console.log('🔍 generateBatchAnalysis - Email account lookup:', {
+        userId: user._id,
+        email: firstMessage.email,
+        found: !!emailAccount,
+        categoriesCount: emailAccount?.categories?.length || 0
+      });
+
+      if (!emailAccount) {
+        throw new Error('Email account not found');
+      }
+
       // Create detailed category information for AI
-      const categoryInfo = user.categories.map(cat => 
+      const categoryInfo = emailAccount.categories.map(cat => 
         `- ${cat.name}: ${cat.description}`
       ).join('\n');
       
-      const categoryNames = user.categories.map(c => c.name).join(', ');
+      const categoryNames = emailAccount.categories.map(c => c.name).join(', ');
 
       // Prepare batch prompt with enhanced category context
       const batchPrompt = `Analyze these emails and provide insights for each one. 

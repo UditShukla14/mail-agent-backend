@@ -11,6 +11,7 @@ class EnrichmentQueueService {
     this.maxRetries = 3;
     this.currentTokens = 0;
     this.maxTokensPerMinute = 1000; // Assuming a default maxTokensPerMinute
+    this.processingEmails = new Set(); // Track emails currently being processed
   }
 
   async addToQueue(emails) {
@@ -43,14 +44,19 @@ class EnrichmentQueueService {
         return;
       }
 
-      // Filter out already enriched emails before adding to queue
+      // Filter out already enriched emails and currently processing emails
       const unenrichedEmails = await this.filterUnenrichedEmails(validEmails);
-      if (unenrichedEmails.length === 0) {
-        console.log('✅ All emails are already enriched. Nothing to add to queue.');
+      const notProcessingEmails = unenrichedEmails.filter(email => !this.processingEmails.has(email.id));
+      
+      if (notProcessingEmails.length === 0) {
+        console.log('✅ All emails are already enriched or being processed. Nothing to add to queue.');
         return;
       }
 
-      this.queue.push(...unenrichedEmails);
+      // Add emails to processing set to prevent duplicates
+      notProcessingEmails.forEach(email => this.processingEmails.add(email.id));
+      
+      this.queue.push(...notProcessingEmails);
       
       // Start processing if not already running
       if (!this.processing) {
@@ -96,6 +102,9 @@ class EnrichmentQueueService {
         console.log(`🔄 Processing batch of ${batch.length} emails`);
         
         const result = await this.processBatch(batch);
+        
+        // Remove processed emails from processing set
+        batch.forEach(email => this.processingEmails.delete(email.id));
         
         // Only continue if there are actually unprocessed emails
         if (result && this.queue.length > 0) {
@@ -209,6 +218,14 @@ class EnrichmentQueueService {
     );
     
     await this.addToQueue(emails);
+  }
+
+  // Method to clear processing state (useful for debugging)
+  clearProcessingState() {
+    this.processingEmails.clear();
+    this.queue = [];
+    this.processing = false;
+    console.log('🧹 Processing state cleared');
   }
 }
 

@@ -96,8 +96,7 @@ export const getUserProfile = async (req, res) => {
         email: user.email,
         appUserId: user.appUserId,
         createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-        categories: user.categories
+        updatedAt: user.updatedAt
       },
       accounts: {
         total: totalAccounts,

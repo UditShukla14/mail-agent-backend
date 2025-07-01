@@ -1,10 +1,16 @@
 import express from 'express';
-import { getEmailStats, getEmailAnalytics, getUnreadEmailsSummary } from '../controllers/emailAnalyticsController.js';
 import jwt from 'jsonwebtoken';
+import {
+  getEmailCategories,
+  updateEmailCategories,
+  addEmailCategory,
+  deleteEmailCategory,
+  getUserEmailAccounts
+} from '../controllers/emailCategoriesController.js';
 
 const router = express.Router();
 
-// Use the same JWT_SECRET as in userController
+// Use the same JWT_SECRET as in other routes
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
 // Middleware to verify token from cookies or Authorization header
@@ -31,7 +37,7 @@ const verifyToken = (req, res, next) => {
         console.log('Token decoded:', decoded);
         // Set the user ID from the decoded token
         req.user = {
-            _id: decoded.userId, // This matches the userId field in the Email model
+            _id: decoded.userId,
             email: decoded.email,
             appUserId: decoded.appUserId
         };
@@ -47,25 +53,22 @@ const verifyToken = (req, res, next) => {
     }
 };
 
-// Get email statistics
-router.get('/stats', verifyToken, getEmailStats);
+// Apply authentication middleware to all routes
+router.use(verifyToken);
 
-// Get detailed email analytics
-router.get('/analytics', verifyToken, getEmailAnalytics);
+// Get categories for a specific email account
+router.get('/', getEmailCategories);
 
-// Get unread emails summary from last 24 hours
-router.get('/unread-summary', verifyToken, getUnreadEmailsSummary);
+// Update categories for a specific email account
+router.put('/', updateEmailCategories);
 
-// Add route to clear enrichment queue state (for debugging)
-router.post('/clear-enrichment-queue', async (req, res) => {
-  try {
-    const enrichmentQueueService = await import('../services/enrichmentQueueService.js');
-    enrichmentQueueService.default.clearProcessingState();
-    res.json({ success: true, message: 'Enrichment queue state cleared' });
-  } catch (error) {
-    console.error('Error clearing enrichment queue:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
+// Add a new category to a specific email account
+router.post('/add', addEmailCategory);
+
+// Delete a category from a specific email account
+router.delete('/:categoryName', deleteEmailCategory);
+
+// Get all email accounts for a user
+router.get('/accounts/:appUserId', getUserEmailAccounts);
 
 export default router; 

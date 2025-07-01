@@ -47,6 +47,67 @@ async function sendEmail(accessToken, { to, subject = '', body, cc, bcc }) {
   }
 }
 
+// 📧 Reply to email
+async function replyToEmail(accessToken, { messageId, comment, toRecipients, ccRecipients, bccRecipients }) {
+  try {
+    console.log(`📧 Replying to message ${messageId}`);
+    
+    const replyData = {
+      comment: comment || '',
+      toRecipients: toRecipients || [],
+      ccRecipients: ccRecipients || [],
+      bccRecipients: bccRecipients || []
+    };
+
+    await axios.post(
+      `https://graph.microsoft.com/v1.0/me/messages/${messageId}/reply`,
+      replyData,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    console.log(`✅ Reply sent successfully for message ${messageId}`);
+    return { success: true };
+  } catch (err) {
+    console.error('❌ Failed to reply to email:', err?.response?.data || err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+// 📧 Reply all to email
+async function replyAllToEmail(accessToken, { messageId, comment, toRecipients, ccRecipients, bccRecipients }) {
+  try {
+    console.log(`📧 Reply all to message ${messageId}`);
+    
+    const replyAllData = {
+      comment: comment || '',
+      toRecipients: toRecipients || [],
+      ccRecipients: ccRecipients || [],
+      bccRecipients: bccRecipients || []
+    };
+
+    await axios.post(
+      `https://graph.microsoft.com/v1.0/me/messages/${messageId}/replyAll`,
+      replyAllData,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    console.log(`✅ Reply all sent successfully for message ${messageId}`);
+    return { success: true };
+  } catch (err) {
+    console.error('❌ Failed to reply all to email:', err?.response?.data || err.message);
+    return { success: false, error: err.message };
+  }
+}
 
 // get folders with count 
 async function getMailFolders(accessToken) {
@@ -289,4 +350,4 @@ export const deleteMessage = async (token, messageId) => {
   }
 };
 
-export { sendEmail, getMailFolders, getMessageById, getMessagesByFolder, markMessageRead, markMessageImportant, getAttachmentsByMessageId };
+export { sendEmail, replyToEmail, replyAllToEmail, getMailFolders, getMessageById, getMessagesByFolder, markMessageRead, markMessageImportant, getAttachmentsByMessageId };

@@ -4,6 +4,8 @@ import {
   getMessagesByFolder,
   getMessageById,
   sendEmail,
+  replyToEmail,
+  replyAllToEmail,
   markMessageRead,
   markMessageImportant,
   deleteMessage
@@ -215,6 +217,70 @@ export const initMailSocket = (socket, io) => {
     socket.emit('mail:sent', result);
   });
 
+  // 📧 Reply to email
+  socket.on('mail:reply', async ({ appUserId, email, messageId, comment, toRecipients, ccRecipients, bccRecipients }) => {
+    try {
+      console.log(`📧 Reply requested for message ${messageId}`);
+      
+      const token = await getToken(appUserId, email, 'outlook');
+      if (!token) {
+        console.error('❌ Token not found for:', email);
+        return socket.emit('mail:error', 'Token not found');
+      }
+
+      const result = await replyToEmail(token, { 
+        messageId, 
+        comment, 
+        toRecipients, 
+        ccRecipients, 
+        bccRecipients 
+      });
+
+      if (result.success) {
+        console.log(`✅ Reply sent successfully for message ${messageId}`);
+        socket.emit('mail:replied', { messageId, success: true });
+      } else {
+        console.error(`❌ Failed to send reply for message ${messageId}:`, result.error);
+        socket.emit('mail:error', `Failed to send reply: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('❌ Error in mail:reply:', error);
+      socket.emit('mail:error', 'Failed to send reply: ' + error.message);
+    }
+  });
+
+  // 📧 Reply all to email
+  socket.on('mail:replyAll', async ({ appUserId, email, messageId, comment, toRecipients, ccRecipients, bccRecipients }) => {
+    try {
+      console.log(`📧 Reply all requested for message ${messageId}`);
+      
+      const token = await getToken(appUserId, email, 'outlook');
+      if (!token) {
+        console.error('❌ Token not found for:', email);
+        return socket.emit('mail:error', 'Token not found');
+      }
+
+      const result = await replyAllToEmail(token, { 
+        messageId, 
+        comment, 
+        toRecipients, 
+        ccRecipients, 
+        bccRecipients 
+      });
+
+      if (result.success) {
+        console.log(`✅ Reply all sent successfully for message ${messageId}`);
+        socket.emit('mail:repliedAll', { messageId, success: true });
+      } else {
+        console.error(`❌ Failed to send reply all for message ${messageId}:`, result.error);
+        socket.emit('mail:error', `Failed to send reply all: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('❌ Error in mail:replyAll:', error);
+      socket.emit('mail:error', 'Failed to send reply all: ' + error.message);
+    }
+  });
+
   // ✅ Mark as read
   socket.on('mail:markRead', async ({ appUserId, email, messageId }) => {
     const token = await getToken(appUserId, email, 'outlook');
@@ -222,7 +288,7 @@ export const initMailSocket = (socket, io) => {
 
     try {
       await markMessageRead(token, messageId);
-      socket.emit('mail:markedRead', messageId);
+      socket.emit('mail:markedRead', { messageId });
     } catch {
       socket.emit('mail:error', 'Failed to mark as read');
     }
