@@ -26,6 +26,16 @@ export const registerUser = async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    // Set the token as an HTTP-only cookie for cross-site usage
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      domain: '.worxstream.io',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
     res.status(201).json({
       message: 'User registered successfully.',
       token,
@@ -55,6 +65,16 @@ export const loginUser = async (req, res) => {
       JWT_SECRET,
       { expiresIn: '7d' }
     );
+
+    // Set the token as an HTTP-only cookie for cross-site usage
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      domain: '.worxstream.io',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
 
     res.json({ token, appUserId: user.appUserId });
   } catch (err) {
