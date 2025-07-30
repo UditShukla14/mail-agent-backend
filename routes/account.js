@@ -3,6 +3,7 @@ import express from 'express';
 import Token from '../models/Token.js';
 import Email from '../models/email.js';
 import User from '../models/User.js';
+import EmailAccount from '../models/EmailAccount.js';
 
 const router = express.Router();
 
@@ -47,13 +48,21 @@ router.delete('/unlink', async (req, res) => {
       email: email 
     });
 
+    // Delete the EmailAccount record (which contains categories) for this account
+    const emailAccountResult = await EmailAccount.deleteOne({ 
+      userId: user._id, 
+      email: email 
+    });
+
     console.log(`✅ Successfully unlinked account: ${email}`);
     console.log(`📧 Deleted ${emailResult.deletedCount} emails for account: ${email}`);
+    console.log(`🏷️ Deleted ${emailAccountResult.deletedCount} email account record (with categories) for account: ${email}`);
 
     res.json({ 
       success: true, 
       message: 'Account unlinked successfully',
-      deletedEmails: emailResult.deletedCount
+      deletedEmails: emailResult.deletedCount,
+      deletedEmailAccount: emailAccountResult.deletedCount
     });
 
   } catch (error) {
