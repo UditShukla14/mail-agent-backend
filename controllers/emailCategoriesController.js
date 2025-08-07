@@ -9,24 +9,37 @@ export const getEmailCategories = async (req, res) => {
       user: req.user
     });
 
-    const { email: queryEmail, appUserId } = req.query;
-    const { email: tokenEmail, appUserId: tokenAppUserId } = req.user;
+    const { email: queryEmail } = req.query;
+    const worxstreamUserId = req.user.id;
 
-    const targetEmail = queryEmail || tokenEmail;
-    const targetAppUserId = appUserId || tokenAppUserId;
-
-    console.log('🎯 Target email and appUserId:', { targetEmail, targetAppUserId });
-
-    if (!targetEmail || !targetAppUserId) {
-      console.error('❌ Missing email or appUserId');
-      return res.status(400).json({ error: 'Email and appUserId are required' });
+    if (!worxstreamUserId) {
+      console.error('❌ No worXstream user ID found');
+      return res.status(401).json({ 
+        success: false,
+        error: 'User not authenticated' 
+      });
     }
 
+    const targetEmail = queryEmail || req.user.email;
+
+    if (!targetEmail) {
+      console.error('❌ Missing email');
+      return res.status(400).json({ 
+        success: false,
+        error: 'Email is required' 
+      });
+    }
+
+    console.log('🎯 Target email and worxstreamUserId:', { targetEmail, worxstreamUserId });
+
     // Get user
-    const user = await User.findOne({ appUserId: targetAppUserId });
+    const user = await User.findOne({ worxstreamUserId });
     if (!user) {
-      console.error('❌ User not found for appUserId:', targetAppUserId);
-      return res.status(404).json({ error: 'User not found' });
+      console.error('❌ User not found for worxstreamUserId:', worxstreamUserId);
+      return res.status(404).json({ 
+        success: false,
+        error: 'User not found' 
+      });
     }
 
     console.log('✅ User found:', user._id);
@@ -53,31 +66,64 @@ export const getEmailCategories = async (req, res) => {
     }
 
     console.log('📋 Returning categories:', emailAccount.categories.length, 'categories');
-    res.json(emailAccount.categories);
+    res.json({
+      success: true,
+      data: emailAccount.categories
+    });
   } catch (error) {
     console.error('❌ Error in getEmailCategories:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Internal server error' 
+    });
   }
 };
 
 // Update categories for a specific email account
 export const updateEmailCategories = async (req, res) => {
   try {
-    const { email: queryEmail, appUserId, categories } = req.body;
-    const { email: tokenEmail, appUserId: tokenAppUserId } = req.user;
+    console.log('🔧 Backend: updateEmailCategories called with:', {
+      body: req.body,
+      user: req.user,
+      headers: req.headers
+    });
 
-    const targetEmail = queryEmail || tokenEmail;
-    const targetAppUserId = appUserId || tokenAppUserId;
+    const { email: queryEmail, categories } = req.body;
+    const worxstreamUserId = req.user.id;
 
-    if (!targetEmail || !targetAppUserId || !categories) {
-      return res.status(400).json({ error: 'Email, appUserId, and categories are required' });
+    console.log('🔧 Backend: Extracted data:', { queryEmail, categories, worxstreamUserId });
+
+    if (!worxstreamUserId) {
+      console.error('❌ Backend: No worXstream user ID found');
+      return res.status(401).json({ 
+        success: false,
+        error: 'User not authenticated' 
+      });
     }
+
+    const targetEmail = queryEmail || req.user.email;
+
+    if (!targetEmail || !categories) {
+      console.error('❌ Backend: Missing required fields:', { targetEmail: !!targetEmail, categories: !!categories });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Email and categories are required' 
+      });
+    }
+
+    console.log('🔧 Backend: Looking up user with worxstreamUserId:', worxstreamUserId);
 
     // Get user
-    const user = await User.findOne({ appUserId: targetAppUserId });
+    const user = await User.findOne({ worxstreamUserId });
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      console.error('❌ Backend: User not found for worxstreamUserId:', worxstreamUserId);
+      return res.status(404).json({ 
+        success: false,
+        error: 'User not found' 
+      });
     }
+
+    console.log('🔧 Backend: User found:', user._id);
 
     // Get or create email account
     let emailAccount = await EmailAccount.findOne({ 
@@ -85,7 +131,10 @@ export const updateEmailCategories = async (req, res) => {
       email: targetEmail 
     });
 
+    console.log('🔧 Backend: Email account lookup result:', emailAccount ? 'Found' : 'Not found');
+
     if (!emailAccount) {
+      console.log('🔧 Backend: Creating new email account for:', targetEmail);
       emailAccount = new EmailAccount({
         userId: user._id,
         email: targetEmail,
@@ -94,36 +143,55 @@ export const updateEmailCategories = async (req, res) => {
     }
 
     // Update categories
+    console.log('🔧 Backend: Updating categories:', categories);
     emailAccount.categories = categories;
     await emailAccount.save();
 
+    console.log('🔧 Backend: Categories updated successfully');
+
     res.json({ 
+      success: true,
       message: 'Categories updated successfully',
-      categories: emailAccount.categories 
+      data: emailAccount.categories
     });
   } catch (error) {
-    console.error('Error updating email categories:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('❌ Backend: Error updating email categories:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Internal server error' 
+    });
   }
 };
 
 // Add a new category to a specific email account
 export const addEmailCategory = async (req, res) => {
   try {
-    const { email: queryEmail, appUserId, category } = req.body;
-    const { email: tokenEmail, appUserId: tokenAppUserId } = req.user;
+    const { email: queryEmail, category } = req.body;
+    const worxstreamUserId = req.user.id;
 
-    const targetEmail = queryEmail || tokenEmail;
-    const targetAppUserId = appUserId || tokenAppUserId;
+    if (!worxstreamUserId) {
+      return res.status(401).json({ 
+        success: false,
+        error: 'User not authenticated' 
+      });
+    }
 
-    if (!targetEmail || !targetAppUserId || !category) {
-      return res.status(400).json({ error: 'Email, appUserId, and category are required' });
+    const targetEmail = queryEmail || req.user.email;
+
+    if (!targetEmail || !category) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Email and category are required' 
+      });
     }
 
     // Get user
-    const user = await User.findOne({ appUserId: targetAppUserId });
+    const user = await User.findOne({ worxstreamUserId });
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'User not found' 
+      });
     }
 
     // Get or create email account
@@ -143,7 +211,10 @@ export const addEmailCategory = async (req, res) => {
     // Check if category name already exists
     const existingCategory = emailAccount.categories.find(cat => cat.name === category.name);
     if (existingCategory) {
-      return res.status(400).json({ error: 'Category with this name already exists' });
+      return res.status(400).json({ 
+        success: false,
+        error: 'Category with this name already exists' 
+      });
     }
 
     // Add new category
@@ -151,32 +222,48 @@ export const addEmailCategory = async (req, res) => {
     await emailAccount.save();
 
     res.json({ 
+      success: true,
       message: 'Category added successfully',
-      categories: emailAccount.categories 
+      data: emailAccount.categories 
     });
   } catch (error) {
     console.error('Error adding email category:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Internal server error' 
+    });
   }
 };
 
 // Delete a category from a specific email account
 export const deleteEmailCategory = async (req, res) => {
   try {
-    const { email: queryEmail, appUserId, categoryName } = req.params;
-    const { email: tokenEmail, appUserId: tokenAppUserId } = req.user;
+    const { email: queryEmail, categoryName } = req.params;
+    const worxstreamUserId = req.user.id;
 
-    const targetEmail = queryEmail || tokenEmail;
-    const targetAppUserId = appUserId || tokenAppUserId;
+    if (!worxstreamUserId) {
+      return res.status(401).json({ 
+        success: false,
+        error: 'User not authenticated' 
+      });
+    }
 
-    if (!targetEmail || !targetAppUserId || !categoryName) {
-      return res.status(400).json({ error: 'Email, appUserId, and categoryName are required' });
+    const targetEmail = queryEmail || req.user.email;
+
+    if (!targetEmail || !categoryName) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Email and categoryName are required' 
+      });
     }
 
     // Get user
-    const user = await User.findOne({ appUserId: targetAppUserId });
+    const user = await User.findOne({ worxstreamUserId });
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'User not found' 
+      });
     }
 
     // Get email account
@@ -186,7 +273,10 @@ export const deleteEmailCategory = async (req, res) => {
     });
 
     if (!emailAccount) {
-      return res.status(404).json({ error: 'Email account not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Email account not found' 
+      });
     }
 
     // Remove category
@@ -194,42 +284,58 @@ export const deleteEmailCategory = async (req, res) => {
     await emailAccount.save();
 
     res.json({ 
+      success: true,
       message: 'Category deleted successfully',
-      categories: emailAccount.categories 
+      data: emailAccount.categories 
     });
   } catch (error) {
     console.error('Error deleting email category:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Internal server error' 
+    });
   }
 };
 
 // Get all email accounts for a user
 export const getUserEmailAccounts = async (req, res) => {
   try {
-    const { appUserId } = req.params;
-    const { appUserId: tokenAppUserId } = req.user;
+    const worxstreamUserId = req.user.id;
 
-    const targetAppUserId = appUserId || tokenAppUserId;
-
-    if (!targetAppUserId) {
-      return res.status(400).json({ error: 'appUserId is required' });
+    if (!worxstreamUserId) {
+      return res.status(401).json({ 
+        success: false,
+        error: 'User not authenticated' 
+      });
     }
 
     // Get user
-    const user = await User.findOne({ appUserId: targetAppUserId });
+    const user = await User.findOne({ worxstreamUserId });
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'User not found' 
+      });
     }
 
     // Get all email accounts for this user
-    const emailAccounts = await EmailAccount.find({ 
-      userId: user._id,
-      isActive: true 
-    });
+    const emailAccounts = await EmailAccount.find({ userId: user._id });
 
-    res.json(emailAccounts);
+    const accounts = emailAccounts.map(account => ({
+      email: account.email,
+      provider: account.provider,
+      categories: account.categories
+    }));
+
+    res.json({
+      success: true,
+      data: accounts
+    });
   } catch (error) {
     console.error('Error getting user email accounts:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ 
+      success: false,
+      error: 'Internal server error' 
+    });
   }
 }; 

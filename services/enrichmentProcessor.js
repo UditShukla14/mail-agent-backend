@@ -1,72 +1,96 @@
-import emailEnrichmentService from './emailEnrichment.js';
+import { analyzeEmail } from './claudeApiService.js';
 import Email from '../models/email.js';
 
-// Rate limiting configuration
-const RATE_LIMIT = {
-  tokensPerMinute: 40000, // Reduced from 45000 to be more conservative
-  maxConcurrent: 2, // Reduced from 3 to 2 concurrent processes
+// Configuration
+const CONFIG = {
   retryDelay: 60000, // 1 minute delay between retries
   maxRetries: 3,
-  batchSize: 3 // Reduced batch size to 3 emails
+  batchSize: 5 // Back to 5 emails per batch as requested
 };
 
-// Token usage tracking
-let currentTokenUsage = 0;
-let lastResetTime = Date.now();
-
-// Reset token usage every minute
-setInterval(() => {
-  currentTokenUsage = 0;
-  lastResetTime = Date.now();
-}, 60000);
-
-// More accurate token estimation
-function estimateTokenCount(text) {
-  // Count words and characters for better estimation
-  const words = text.split(/\s+/).length;
-  const chars = text.length;
-  
-  // Average of word-based and character-based estimation
-  const wordBasedEstimate = words * 1.3; // Average word is ~1.3 tokens
-  const charBasedEstimate = chars / 4; // Rough character-based estimate
-  
-  return Math.ceil((wordBasedEstimate + charBasedEstimate) / 2);
-}
-
-// Check if we're within rate limits with buffer
-function checkRateLimit(content) {
-  const estimatedTokens = estimateTokenCount(content);
-  const timeSinceReset = Date.now() - lastResetTime;
-  const buffer = 0.2; // 20% buffer for safety
-  
-  // If we're close to the limit, wait
-  if (timeSinceReset < 60000 && 
-      (currentTokenUsage + estimatedTokens) > (RATE_LIMIT.tokensPerMinute * (1 - buffer))) {
-    console.log(`⏳ Rate limit buffer reached. Current usage: ${currentTokenUsage}, Estimated: ${estimatedTokens}`);
-    return false;
-  }
-  
-  currentTokenUsage += estimatedTokens;
-  return true;
-}
-
 // Process a single email with retries
-async function processEmailWithRetry(email, retryCount = 0) {
+async function processEmailWithRetry(email, retryCount = 0, emitCallback = null) {
   try {
-    if (!checkRateLimit(email.content)) {
-      throw new Error('Rate limit exceeded');
+    // Try to emit analyzing status (but don't fail if socket is not available)
+    try {
+      if (emitCallback) {
+        emitCallback('mail:enrichmentStatus', {
+          messageId: email.id,
+          status: 'analyzing',
+          message: 'Analyzing email content...'
+        });
+      }
+    } catch (socketError) {
+      console.log('📡 Socket not available for analyzing status, continuing with processing...');
     }
 
-    const result = await emailEnrichmentService.enrichEmail(email);
-    return { success: true, data: result };
+    // Use the centralized API service for analysis
+    const analysis = await analyzeEmail(email);
+    
+    // ALWAYS save to database first - this is the critical part
+    const updatedEmail = await Email.findByIdAndUpdate(
+      email._id,
+      {
+        $set: {
+          aiMeta: analysis,
+          isProcessed: true
+        }
+      },
+      { new: true }
+    );
+    
+    console.log(`✅ Email ${email.id} processed and saved to database successfully`);
+    
+    // Try to emit completion status (but don't fail if socket is not available)
+    try {
+      if (emitCallback) {
+        emitCallback('mail:enrichmentStatus', {
+          messageId: email.id,
+          status: 'completed',
+          message: 'Email analysis completed',
+          aiMeta: analysis,
+          email: updatedEmail
+        });
+      }
+    } catch (socketError) {
+      console.log(`📡 Socket not available for completion status for email ${email.id}, but data is saved to database`);
+    }
+    
+    return { success: true, data: updatedEmail };
   } catch (error) {
     console.error(`❌ Attempt ${retryCount + 1} failed for email ${email.id}: ${error.message}`);
     
-    if (retryCount < RATE_LIMIT.maxRetries) {
-      const delay = RATE_LIMIT.retryDelay * Math.pow(2, retryCount); // Exponential backoff
+    if (retryCount < CONFIG.maxRetries) {
+      const delay = CONFIG.retryDelay * Math.pow(2, retryCount); // Exponential backoff
       console.log(`⏳ Waiting ${delay/1000} seconds before retry...`);
       await new Promise(resolve => setTimeout(resolve, delay));
-      return processEmailWithRetry(email, retryCount + 1);
+      return processEmailWithRetry(email, retryCount + 1, emitCallback);
+    }
+    
+    // ALWAYS save error status to database
+    await Email.findByIdAndUpdate(email._id, {
+      $set: {
+        'aiMeta.error': `Failed after ${CONFIG.maxRetries} attempts: ${error.message}`,
+        'aiMeta.enrichedAt': new Date(),
+        'aiMeta.version': '1.0',
+        isProcessed: false
+      }
+    });
+
+    console.log(`❌ Email ${email.id} failed after ${CONFIG.maxRetries} attempts, error saved to database`);
+
+    // Try to emit error status (but don't fail if socket is not available)
+    try {
+      if (emitCallback) {
+        emitCallback('mail:enrichmentStatus', {
+          messageId: email.id,
+          status: 'error',
+          message: `Failed after ${CONFIG.maxRetries} attempts: ${error.message}`,
+          error: true
+        });
+      }
+    } catch (socketError) {
+      console.log(`📡 Socket not available for error status for email ${email.id}, but error is saved to database`);
     }
     
     return { success: false, error };
@@ -74,22 +98,22 @@ async function processEmailWithRetry(email, retryCount = 0) {
 }
 
 // Process a batch of emails
-export async function processEnrichmentBatch(emails) {
+export async function processEnrichmentBatch(emails, emitCallback = null) {
   console.log(`🔄 Processing batch of ${emails.length} emails`);
   
-  // Process emails in smaller chunks to respect rate limits
+  // Process emails in chunks
   const results = [];
-  for (let i = 0; i < emails.length; i += RATE_LIMIT.batchSize) {
-    const chunk = emails.slice(i, i + RATE_LIMIT.batchSize);
+  for (let i = 0; i < emails.length; i += CONFIG.batchSize) {
+    const chunk = emails.slice(i, i + CONFIG.batchSize);
     console.log(`📧 Processing chunk of ${chunk.length} emails`);
     
     const chunkResults = await Promise.allSettled(
-      chunk.map(email => processEmailWithRetry(email))
+      chunk.map(email => processEmailWithRetry(email, 0, emitCallback))
     );
     results.push(...chunkResults);
     
-    // Add a longer delay between chunks to prevent rate limit issues
-    if (i + RATE_LIMIT.batchSize < emails.length) {
+    // Add a delay between chunks
+    if (i + CONFIG.batchSize < emails.length) {
       const delay = 30000; // 30 seconds delay between chunks
       console.log(`⏳ Waiting ${delay/1000} seconds before next chunk...`);
       await new Promise(resolve => setTimeout(resolve, delay));

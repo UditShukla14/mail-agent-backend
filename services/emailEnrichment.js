@@ -3,6 +3,7 @@ import emailService from './emailService.js';
 import enrichmentQueueService from './enrichmentQueueService.js';
 import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
+import { analyzeEmail, analyzeEmailBatch } from './claudeApiService.js';
 
 class EmailEnrichmentService {
   constructor() {
@@ -51,7 +52,7 @@ class EmailEnrichmentService {
       }
 
       // Find the socket for this user
-      const userSocket = this.findUserSocket(user.appUserId);
+      const userSocket = this.findUserSocket(user.worxstreamUserId);
       if (userSocket) {
         userSocket.emit('mail:enrichmentStatus', {
           messageId: email.id,
@@ -118,7 +119,7 @@ class EmailEnrichmentService {
       // Get user to find their socket
       const user = await User.findById(email.userId);
       if (user) {
-        const userSocket = this.findUserSocket(user.appUserId);
+        const userSocket = this.findUserSocket(user.worxstreamUserId);
         if (userSocket) {
           userSocket.emit('mail:enrichmentStatus', {
             messageId: email.id,
@@ -132,30 +133,33 @@ class EmailEnrichmentService {
     }
   }
 
-  // Helper method to find a user's socket
-  findUserSocket(appUserId) {
+  // Register a socket for unified access
+  registerSocket(socket) {
     if (!this.io) {
-      console.log('❌ IO instance not set in emailEnrichmentService');
+      console.warn('⚠️ IO not set, cannot register socket');
+      return;
+    }
+    
+    // Socket is already registered with IO, just log for tracking
+    console.log(`📡 Socket registered for user: ${socket.worxstreamUserId}`);
+  }
+
+  // Helper method to find a user's socket
+  findUserSocket(worxstreamUserId) {
+    if (!this.io) {
       return null;
     }
     
     // Get all connected sockets
     const sockets = Array.from(this.io.sockets.sockets.values());
-    console.log(`🔍 Looking for socket with appUserId: ${appUserId}`);
-    console.log(`🔍 Found ${sockets.length} connected sockets`);
     
-    // Find the socket that has this appUserId
-    const userSocket = sockets.find(socket => socket.appUserId === appUserId);
-    
-    if (userSocket) {
-      console.log(`✅ Found socket for user ${appUserId}: ${userSocket.id}`);
-    } else {
-      console.log(`❌ No socket found for user ${appUserId}`);
-      // Log all socket appUserIds for debugging
-      sockets.forEach(socket => {
-        console.log(`🔍 Socket ${socket.id} has appUserId: ${socket.appUserId}`);
-      });
-    }
+    // Find the socket that has this worxstreamUserId (handle both string and number types)
+    const userSocket = sockets.find(socket => {
+      const socketUserId = socket.worxstreamUserId;
+      
+      // Compare as strings to handle both number and string types
+      return String(socketUserId) === String(worxstreamUserId);
+    });
     
     return userSocket;
   }
@@ -164,7 +168,7 @@ class EmailEnrichmentService {
     try {
       console.log(`🔄 Starting batch enrichment for ${emails.length} emails`);
 
-      // Get the appUserId from the first email's user
+      // Get the worxstreamUserId from the first email's user
       const firstEmail = emails[0];
       if (!firstEmail || !firstEmail.userId) {
         throw new Error('Invalid email batch - missing user information');
@@ -176,7 +180,7 @@ class EmailEnrichmentService {
       }
 
       // Find the socket for this user
-      const userSocket = this.findUserSocket(user.appUserId);
+      const userSocket = this.findUserSocket(user.worxstreamUserId);
 
       // Filter out already enriched emails and validate required fields
       const unenrichedEmails = [];
@@ -225,10 +229,10 @@ class EmailEnrichmentService {
 
       console.log(`📧 Found ${unenrichedEmails.length} emails needing enrichment`);
 
-      // Process emails in smaller batches to prevent rate limiting
-      const batchSize = 5; // Reduced batch size
+      // Process emails in batches to prevent rate limiting
+      const batchSize = 5; // Back to 5 emails per batch as requested
       const maxRetries = 3;
-      const baseDelay = 60000; // 1 minute base delay
+      const baseDelay = 120000; // 2 minutes base delay for API overload protection
 
       for (let i = 0; i < unenrichedEmails.length; i += batchSize) {
         const batch = unenrichedEmails.slice(i, i + batchSize);
@@ -245,7 +249,7 @@ class EmailEnrichmentService {
               if (!user) {
                 throw new Error('User not found');
               }
-              return emailService.getMessage(user.appUserId, email.email, email.id);
+              return emailService.getMessage(user.worxstreamUserId, email.email, email.id);
             }));
 
             // Generate batch analysis
@@ -326,7 +330,7 @@ class EmailEnrichmentService {
 
         // Add delay between batches to prevent rate limiting
         if (i + batchSize < unenrichedEmails.length) {
-          const delay = 10000; // 10 seconds delay between batches
+          const delay = 30000; // 30 seconds delay between batches to prevent API overload
           console.log(`⏳ Waiting ${delay/1000} seconds before next batch...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
@@ -418,69 +422,9 @@ Format the response as a JSON object with these fields:
       
       for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
-          // Call Claude API for analysis
-          const response = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': process.env.ANTHROPIC_API_KEY,
-              'anthropic-version': '2023-06-01'
-            },
-            body: JSON.stringify({
-              model: 'claude-3-haiku-20240307',
-              max_tokens: 1000,
-              messages: [
-                {
-                  role: 'user',
-                  content: prompt
-                }
-              ]
-            })
-          });
-
-          if (!response.ok) {
-            const errorData = await response.json();
-            console.error('❌ Claude API error:', {
-              status: response.status,
-              statusText: response.statusText,
-              error: errorData
-            });
-
-            // If rate limited, wait and retry
-            if (response.status === 429) {
-              const delay = baseDelay * Math.pow(2, attempt);
-              console.log(`⏳ Rate limited, waiting ${delay/1000} seconds before retry ${attempt + 1}/${maxRetries}`);
-              await new Promise(resolve => setTimeout(resolve, delay));
-              continue;
-            }
-
-            throw new Error(`Claude API error: ${response.status} ${response.statusText}`);
-          }
-
-          const data = await response.json();
-          
-          if (!data.content || !data.content[0] || !data.content[0].text) {
-            console.error('❌ Invalid response format from Claude:', data);
-            throw new Error('Invalid response format from Claude API');
-          }
-
-          let analysis;
-          try {
-            analysis = JSON.parse(data.content[0].text);
-          } catch (parseError) {
-            console.error('❌ Failed to parse Claude response:', data.content[0].text);
-            throw new Error('Failed to parse Claude response as JSON');
-          }
-
-          // Validate and normalize the response
-          return {
-            summary: analysis.summary || 'No summary available',
-            category: analysis.category || 'Other',
-            priority: analysis.priority || 'medium',
-            sentiment: analysis.sentiment || 'neutral',
-            actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
-            version: '1.0'
-          };
+          // Use the centralized API service for analysis
+          const analysis = await analyzeEmail(message);
+          return analysis;
         } catch (error) {
           // If this is the last attempt, throw the error
           if (attempt === maxRetries - 1) {
@@ -501,235 +445,15 @@ Format the response as a JSON object with these fields:
 
   async generateBatchAnalysis(messages) {
     try {
-      // Get user and email account for categories from the first message
-      const firstMessage = messages[0];
-      console.log('🔍 generateBatchAnalysis - First message:', {
-        userId: firstMessage.userId,
-        email: firstMessage.email,
-        from: firstMessage.from,
-        to: firstMessage.to
-      });
+      console.log('🔍 generateBatchAnalysis - Processing batch of', messages.length, 'emails');
       
-      const user = await User.findById(firstMessage.userId);
-      if (!user) {
-        throw new Error('User not found');
-      }
-
-      // Get email account for this specific email (use the user's email address)
-      const emailAccount = await EmailAccount.findOne({ 
-        userId: user._id, 
-        email: firstMessage.email 
-      });
-
-      console.log('🔍 generateBatchAnalysis - Email account lookup:', {
-        userId: user._id,
-        email: firstMessage.email,
-        found: !!emailAccount,
-        categoriesCount: emailAccount?.categories?.length || 0
-      });
-
-      if (!emailAccount) {
-        throw new Error('Email account not found');
-      }
-
-      // Create detailed category information for AI
-      const categoryInfo = emailAccount.categories.map(cat => 
-        `- ${cat.name}: ${cat.description}`
-      ).join('\n');
+      // Use the centralized API service for batch analysis
+      const analyses = await analyzeEmailBatch(messages);
       
-      const categoryNames = emailAccount.categories.map(c => c.name).join(', ');
-
-      // Prepare batch prompt with enhanced category context
-      const batchPrompt = `Analyze these emails and provide insights for each one. 
-
-Available Categories (choose the most appropriate one for each email):
-${categoryInfo}
-
-For each email, provide:
-1. A brief summary (2-3 sentences)
-2. The category (must be one of: ${categoryNames})
-3. Priority level (urgent, high, medium, low)
-4. Sentiment (positive, negative, neutral)
-5. Key action items or next steps (if any)
-
-Emails to analyze:
-${messages.map((msg, index) => `
-Email ${index + 1}:
-Subject: ${msg.subject}
-From: ${msg.from}
-To: ${msg.to}
-Content: ${msg.content}
----`).join('\n')}
-
-IMPORTANT: Your response must be a valid JSON array of objects. Each object must have these exact fields:
-{
-  "summary": "string",
-  "category": "string",
-  "priority": "string",
-  "sentiment": "string",
-  "actionItems": ["string"]
-}
-
-CRITICAL FORMATTING RULES:
-1. The response must start with [ and end with ]
-2. Each object must be separated by a comma
-3. All property names must be in double quotes
-4. All string values must be in double quotes
-5. The actionItems array must be an array of strings
-6. Do not include any text before or after the JSON array
-7. Do not include any comments or explanations
-8. Ensure all quotes are properly escaped
-9. Do not include trailing commas
-
-Example of valid response format:
-[
-  {
-    "summary": "Meeting scheduled for project review",
-    "category": "time_sensitive_calendar",
-    "priority": "high",
-    "sentiment": "neutral",
-    "actionItems": ["Prepare presentation", "Review project timeline"]
-  },
-  {
-    "summary": "New feature request from client",
-    "category": "customer_sales_ops",
-    "priority": "medium",
-    "sentiment": "positive",
-    "actionItems": ["Evaluate feasibility", "Create timeline"]
-  }
-]`;
-
-      // Implement retry logic with exponential backoff
-      const maxRetries = 3;
-      const baseDelay = 60000;
-      
-      for (let attempt = 0; attempt < maxRetries; attempt++) {
-        try {
-          // Call Claude API for batch analysis
-          const response = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': process.env.ANTHROPIC_API_KEY,
-              'anthropic-version': '2023-06-01'
-            },
-            body: JSON.stringify({
-              model: 'claude-3-haiku-20240307',
-              max_tokens: 4000, // Increased for batch processing
-              messages: [
-                {
-                  role: 'user',
-                  content: batchPrompt
-                }
-              ]
-            })
-          });
-
-          if (!response.ok) {
-            const errorData = await response.json();
-            console.error('❌ Claude API error:', {
-              status: response.status,
-              statusText: response.statusText,
-              error: errorData
-            });
-
-            // If rate limited, wait and retry
-            if (response.status === 429) {
-              const delay = baseDelay * Math.pow(2, attempt);
-              console.log(`⏳ Rate limited, waiting ${delay/1000} seconds before retry ${attempt + 1}/${maxRetries}`);
-              await new Promise(resolve => setTimeout(resolve, delay));
-              continue;
-            }
-
-            throw new Error(`Claude API error: ${response.status} ${response.statusText}`);
-          }
-
-          const data = await response.json();
-          
-          if (!data.content || !data.content[0] || !data.content[0].text) {
-            console.error('❌ Invalid response format from Claude:', data);
-            throw new Error('Invalid response format from Claude API');
-          }
-
-          let analyses;
-          try {
-            // Clean the response text to ensure it's valid JSON
-            const cleanedText = data.content[0].text.trim();
-            
-            // Find the first [ and last ] to extract just the JSON array
-            const startIndex = cleanedText.indexOf('[');
-            const endIndex = cleanedText.lastIndexOf(']') + 1;
-            
-            if (startIndex === -1 || endIndex === 0) {
-              throw new Error('No JSON array found in response');
-            }
-            
-            const jsonText = cleanedText.slice(startIndex, endIndex);
-            
-            // Try to parse the JSON with better error handling
-            try {
-              analyses = JSON.parse(jsonText);
-            } catch (parseError) {
-              // If parsing fails, try to fix common JSON formatting issues
-              const fixedJsonText = jsonText
-                .replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3') // Add quotes to unquoted keys
-                .replace(/(\w+)(\s*:)/g, '"$1"$2') // Add quotes to any remaining unquoted keys
-                .replace(/'/g, '"') // Replace single quotes with double quotes
-                .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
-                .replace(/([^\\])"/g, '$1\\"') // Escape unescaped quotes
-                .replace(/\\"/g, '"'); // Fix double escaped quotes
-              
-              try {
-                analyses = JSON.parse(fixedJsonText);
-              } catch (secondParseError) {
-                console.error('❌ Failed to parse even after fixing JSON:', fixedJsonText);
-                throw new Error('Failed to parse response as JSON even after fixing common issues');
-              }
-            }
-            
-            if (!Array.isArray(analyses)) {
-              throw new Error('Response is not an array');
-            }
-            
-            // Validate each analysis object
-            analyses = analyses.map((analysis, index) => {
-              if (!analysis || typeof analysis !== 'object') {
-                console.error(`❌ Invalid analysis object at index ${index}:`, analysis);
-                throw new Error(`Invalid analysis object at index ${index}`);
-              }
-              
-              // Ensure all required fields exist with proper types
-              return {
-                summary: typeof analysis.summary === 'string' ? analysis.summary : 'No summary available',
-                category: typeof analysis.category === 'string' ? analysis.category : 'Other',
-                priority: typeof analysis.priority === 'string' ? analysis.priority : 'medium',
-                sentiment: typeof analysis.sentiment === 'string' ? analysis.sentiment : 'neutral',
-                actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
-                version: '1.0'
-              };
-            });
-          } catch (parseError) {
-            console.error('❌ Failed to parse Claude response:', data.content[0].text);
-            console.error('Parse error:', parseError);
-            throw new Error('Failed to parse Claude response as JSON array: ' + parseError.message);
-          }
-
-          return analyses;
-        } catch (error) {
-          // If this is the last attempt, throw the error
-          if (attempt === maxRetries - 1) {
-            throw error;
-          }
-          
-          // Otherwise, wait and retry
-          const delay = baseDelay * Math.pow(2, attempt);
-          console.log(`⏳ Error occurred, waiting ${delay/1000} seconds before retry ${attempt + 1}/${maxRetries}`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
+      return analyses;
     } catch (error) {
-      console.error('❌ Batch AI analysis failed:', error);
-      throw new Error('Failed to generate batch AI analysis: ' + error.message);
+      console.error('❌ AI batch analysis failed:', error);
+      throw new Error('Failed to generate AI batch analysis: ' + error.message);
     }
   }
 }

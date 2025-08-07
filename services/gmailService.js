@@ -56,6 +56,8 @@ async function getMessagesByFolder(accessToken, folderId, nextPageToken = null, 
         const subject = headers.find(h => h.name === 'Subject')?.value || '(No Subject)';
         const from = headers.find(h => h.name === 'From')?.value || '';
         const to = headers.find(h => h.name === 'To')?.value || '';
+        const cc = headers.find(h => h.name === 'Cc')?.value || '';
+        const bcc = headers.find(h => h.name === 'Bcc')?.value || '';
         
         // Get message body
         let content = '';
@@ -74,6 +76,8 @@ async function getMessagesByFolder(accessToken, folderId, nextPageToken = null, 
           id: message.id,
           from,
           to,
+          cc,
+          bcc,
           subject,
           content,
           preview: content.substring(0, 100),
@@ -111,6 +115,8 @@ async function getMessageById(accessToken, messageId) {
     const subject = headers.find(h => h.name === 'Subject')?.value || '(No Subject)';
     const from = headers.find(h => h.name === 'From')?.value || '';
     const to = headers.find(h => h.name === 'To')?.value || '';
+    const cc = headers.find(h => h.name === 'Cc')?.value || '';
+    const bcc = headers.find(h => h.name === 'Bcc')?.value || '';
 
     // Get message body and attachments
     let content = '';
@@ -138,6 +144,8 @@ async function getMessageById(accessToken, messageId) {
       id: messageId,
       from,
       to,
+      cc,
+      bcc,
       subject,
       content,
       timestamp: new Date(parseInt(message.internalDate)),

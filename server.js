@@ -7,6 +7,7 @@ import cookieParser from 'cookie-parser';
 import { initMailSocket } from './sockets/mailSocket.js';
 import connectDB from './utils/db.js';
 import emailEnrichmentService from './services/emailEnrichment.js';
+import axios from 'axios'; // Added axios for token verification
 
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
@@ -14,46 +15,39 @@ import accountRoutes from './routes/account.js';
 import emailAnalyticsRoutes from './routes/emailAnalytics.js';
 import emailCategoriesRoutes from './routes/emailCategories.js';
 import aiReplyRoutes from './routes/aiReply.js';
-// import mailRoutes from './routes/mail.js';
 
 import './services/enrichmentQueueService.js'; // This will initialize the service
 
 dotenv.config();
-console.log('JWT_SECRET loaded:', process.env.JWT_SECRET ? 'Yes' : 'No');
 
 const app = express();
 const httpServer = createServer(app);
 
-// CORS configuration
+// CORS configuration for worXstream integration
 const allowedOrigins = [
-  // 'https://mail-agent-frontend.vercel.app',
-  // 'https://mail-agent-frontend-4hbx1esee-uditshuklas-projects.vercel.app',
-  'http://localhost:3000',
-  'https://xmail.worxstream.io',
-  // 'https://mails.worxstream.io'
+  'http://localhost:3000', // worXstream frontend dev
+  'http://localhost:4173', // Mail agent frontend dev
+  'http://localhost:4174', // worXstream frontend dev (Vite)
+  'https://xmail.worxstream.io', // Mail agent subdomain
+  'https://worxstream.io', // Main worXstream domain
+  'https://app.worxstream.io' // Main app domain
 ];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    console.log('🔍 Checking CORS for origin:', origin);
-    console.log('📋 Allowed origins:', allowedOrigins);
-    
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) {
-      console.log('✅ Allowing request with no origin');
       return callback(null, true);
     }
     
     if (allowedOrigins.includes(origin)) {
-      console.log('✅ Allowing request from:', origin);
       callback(null, true);
     } else {
-      console.log('❌ Blocking request from:', origin);
       callback(new Error('Not allowed by CORS'));
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Info'],
   credentials: true,
   preflightContinue: false,
   optionsSuccessStatus: 204,
@@ -70,7 +64,7 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-User-Info');
   }
   next();
 });
@@ -81,7 +75,7 @@ const io = new Server(httpServer, {
     origin: allowedOrigins,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Info'],
     exposedHeaders: ['Content-Length', 'X-Foo', 'X-Bar']
   },
   path: '/socket.io',
@@ -102,6 +96,25 @@ const io = new Server(httpServer, {
 
 // Set the IO instance for the email enrichment service
 emailEnrichmentService.setIO(io);
+
+// Memory management and cleanup
+const cleanup = () => {
+  console.log('🧹 Running memory cleanup...');
+  
+  // Clear token cache periodically
+  if (global.gc) {
+    global.gc();
+    console.log('🗑️ Garbage collection completed');
+  }
+  
+  // Clear any accumulated data structures
+  if (global.tokenCache) {
+    global.tokenCache.clear();
+  }
+};
+
+// Run cleanup every 5 minutes
+setInterval(cleanup, 5 * 60 * 1000);
 
 // Add a middleware to handle WebSocket upgrade requests
 app.use((req, res, next) => {
@@ -128,16 +141,87 @@ app.use('/account', accountRoutes);
 app.use('/email-analytics', emailAnalyticsRoutes);
 app.use('/email-categories', emailCategoriesRoutes);
 app.use('/ai-reply', aiReplyRoutes);
-// app.use('/mail', mailRoutes);
 
 // Health check endpoint
 app.get('/', (req, res) => {
-  res.json({ status: 'Server is running 🚀' });
+  res.json({ 
+    status: 'Mail Agent Backend is running 🚀',
+    integration: 'worXstream',
+    version: '2.0.0'
+  });
 });
 
 // Initialize socket handlers
+io.use(async (socket, next) => {
+  try {
+    console.log('🔐 Socket authentication check for:', socket.id);
+    
+    // Check for authentication token in handshake
+    const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
+    
+    if (!token) {
+      console.log('❌ No token provided for socket connection');
+      return next(new Error('Authentication required'));
+    }
+
+    // Check for user info in query parameters (from frontend)
+    const userInfoQuery = socket.handshake.query?.userInfo;
+    let userInfo = null;
+    if (userInfoQuery) {
+      try {
+        userInfo = JSON.parse(userInfoQuery);
+        console.log('📋 User info from query:', userInfo);
+      } catch (error) {
+        console.error('Error parsing user info query:', error);
+      }
+    }
+
+    // Verify token with worXstream API
+    try {
+      const worxstreamApiUrl = process.env.WORXSTREAM_API_URL || 'http://localhost:8080';
+      const response = await axios.get(`${worxstreamApiUrl}/api/user-info`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.data.success) {
+        socket.user = response.data.user;
+        socket.token = token;
+        console.log('✅ Socket authenticated for user:', socket.user.email);
+        next();
+      } else {
+        console.log('❌ Token verification failed');
+        next(new Error('Invalid token'));
+      }
+    } catch (error) {
+      console.error('❌ Token verification error:', error.message);
+      
+      // In development mode, allow connection with fallback
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔧 Development mode: Allowing socket connection with fallback');
+        // Use user info from headers if available, otherwise use fallback
+        if (userInfo) {
+          socket.user = userInfo;
+          console.log('✅ Using user info from headers for socket authentication');
+        } else {
+          socket.user = { id: 10000000021, email: 'dev@example.com' };
+          console.log('⚠️ Using fallback user info for socket authentication');
+        }
+        socket.token = token;
+        next();
+      } else {
+        next(new Error('Authentication failed'));
+      }
+    }
+  } catch (error) {
+    console.error('❌ Socket authentication error:', error);
+    next(error);
+  }
+});
+
 io.on('connection', (socket) => {
-  console.log('🔌 New client connected:', socket.id);
+  console.log('🔌 New client connected:', socket.id, 'User:', socket.user?.email);
   
   // Log every event received
   socket.onAny((event, ...args) => {
@@ -157,5 +241,6 @@ connectDB();
 const PORT = process.env.PORT || 8000;
 
 httpServer.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Mail Agent Backend running on port ${PORT}`);
+  console.log(`🔗 Integrated with worXstream backend: ${process.env.WORXSTREAM_API_URL || 'http://localhost:8080'}`);
 });

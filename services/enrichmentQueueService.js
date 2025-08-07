@@ -1,12 +1,13 @@
 import { processEnrichmentBatch } from './enrichmentProcessor.js';
 import Email from '../models/email.js';
 import emailEnrichmentService from './emailEnrichment.js';
+import User from '../models/User.js';
 
 class EnrichmentQueueService {
   constructor() {
     this.queue = [];
     this.processing = false;
-    this.batchSize = 10; // Increased batch size to 10 emails
+    this.batchSize = 5; // Consistent with other services
     this.rateLimitDelay = 60000; // 1 minute delay between batches
     this.maxRetries = 3;
     this.currentTokens = 0;
@@ -16,8 +17,6 @@ class EnrichmentQueueService {
 
   async addToQueue(emails) {
     try {
-      console.log(`📧 Processing ${emails.length} emails for queue`);
-      
       // Validate emails before adding to queue
       const validEmails = emails.filter(email => {
         if (!email || typeof email !== 'object') {
@@ -37,10 +36,7 @@ class EnrichmentQueueService {
         return true;
       });
       
-      console.log(`📧 Adding ${validEmails.length} valid emails to enrichment queue`);
-      
       if (validEmails.length === 0) {
-        console.log('❌ No valid emails to process');
         return;
       }
 
@@ -49,7 +45,6 @@ class EnrichmentQueueService {
       const notProcessingEmails = unenrichedEmails.filter(email => !this.processingEmails.has(email.id));
       
       if (notProcessingEmails.length === 0) {
-        console.log('✅ All emails are already enriched or being processed. Nothing to add to queue.');
         return;
       }
 
@@ -60,7 +55,6 @@ class EnrichmentQueueService {
       
       // Start processing if not already running
       if (!this.processing) {
-        console.log('🔄 Starting queue processing');
         this.processQueue();
       }
     } catch (error) {
@@ -89,42 +83,33 @@ class EnrichmentQueueService {
 
   async processQueue() {
     if (this.processing) {
-      console.log('⏳ Queue processing already in progress');
       return;
     }
 
     this.processing = true;
-    console.log(`🔄 Starting queue processing with ${this.queue.length} emails`);
 
     try {
       while (this.queue.length > 0) {
         const batch = this.queue.splice(0, this.batchSize);
-        console.log(`🔄 Processing batch of ${batch.length} emails`);
         
-        const result = await this.processBatch(batch);
+        await this.processBatch(batch);
         
-        // Remove processed emails from processing set
+        // Clear processing state for this batch
         batch.forEach(email => this.processingEmails.delete(email.id));
         
-        // Only continue if there are actually unprocessed emails
-        if (result && this.queue.length > 0) {
-          console.log(`⏳ Waiting ${this.rateLimitDelay/1000} seconds before next batch...`);
+        // Add delay between batches if there are more emails
+        if (this.queue.length > 0) {
           await new Promise(resolve => setTimeout(resolve, this.rateLimitDelay));
-        } else {
-          // If no unprocessed emails or queue is empty, break the loop
-          break;
         }
       }
     } catch (error) {
-      console.error('❌ Error processing queue:', error);
+      console.error('❌ Error in queue processing:', error);
     } finally {
       this.processing = false;
-      console.log('✅ Queue processing completed');
     }
   }
 
   async processBatch(batch) {
-    console.log('🔄 Processing batch of', batch.length, 'emails');
     
     // Filter out already enriched emails and validate required fields
     const unprocessedEmails = batch.filter(email => {
@@ -144,7 +129,6 @@ class EnrichmentQueueService {
                          email.aiMeta.enrichedAt &&
                          email.isProcessed;
       if (isProcessed) {
-        console.log('⏭️ Skipping already enriched email:', email.id);
         return false;
       }
 
@@ -152,13 +136,11 @@ class EnrichmentQueueService {
     });
 
     if (unprocessedEmails.length === 0) {
-      console.log('✅ All emails in batch are already enriched or invalid');
       return false; // Return false to indicate no processing was needed
     }
 
-    console.log('📝 Processing', unprocessedEmails.length, 'unprocessed emails');
     
-    // Process emails in batches of 5 for API calls
+    // Process emails in batches of 5 for API calls (matching claudeApiService)
     const batchSize = 5;
     const batches = [];
     
@@ -168,17 +150,40 @@ class EnrichmentQueueService {
 
     for (const emailBatch of batches) {
       try {
-        console.log(`🔄 Processing API batch of ${emailBatch.length} emails`);
         
-        // Process the entire batch at once using emailEnrichmentService
-        await emailEnrichmentService.enrichBatch(emailBatch);
-        console.log(`✅ Successfully processed batch of ${emailBatch.length} emails`);
-
-        // Add delay between batches to prevent rate limiting
-        if (batches.indexOf(emailBatch) < batches.length - 1) {
-          console.log('⏳ Waiting 30 seconds before next batch...');
-          await new Promise(resolve => setTimeout(resolve, 30000));
+        // Get the user for this batch to emit events to the correct user
+        const firstEmail = emailBatch[0];
+        const user = await User.findById(firstEmail.userId);
+        if (!user) {
+          console.error('❌ User not found for email batch');
+          continue;
         }
+        
+        // Create emit callback function that tries to emit to specific user
+        // but continues processing even if socket is not available
+        const emitCallback = (event, data) => {
+          try {
+            if (emailEnrichmentService.io) {
+              // Find the specific user's socket and emit to them
+              const userSocket = emailEnrichmentService.findUserSocket(user.worxstreamUserId);
+              if (userSocket) {
+                userSocket.emit(event, data);
+              } else {
+                // User socket not found - this is normal when user is not on mail page
+                // Don't retry or broadcast - just log and continue
+                console.log(`📡 User ${user.worxstreamUserId} socket not found for ${event}, continuing processing...`);
+              }
+            }
+          } catch (error) {
+            // Socket error - don't fail the enrichment process
+            console.log(`📡 Socket error for ${event}: ${error.message}, continuing processing...`);
+          }
+        };
+        
+        // Process the entire batch using the rate-limited processor
+        await processEnrichmentBatch(emailBatch, emitCallback);
+
+        // Rate limiting is handled by the processor, no additional delay needed
       } catch (error) {
         console.error('❌ Error processing batch:', error);
         // Continue with next batch even if one fails
@@ -223,8 +228,6 @@ class EnrichmentQueueService {
   // Method to clear processing state (useful for debugging)
   clearProcessingState() {
     this.processingEmails.clear();
-    this.queue = [];
-    this.processing = false;
     console.log('🧹 Processing state cleared');
   }
 }

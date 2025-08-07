@@ -1,11 +1,17 @@
 // routes/user.js
+// This file is deprecated - authentication is now handled by worXstream backend
+// User management is done through the main worXstream application
+
 import express from 'express';
-import { registerUser, loginUser, getUserProfile } from '../controllers/userController.js';
 
 const router = express.Router();
 
-router.post('/register', registerUser);
-router.post('/login', loginUser);
-router.get('/profile', getUserProfile);
+// Health check endpoint
+router.get('/health', (req, res) => {
+  res.json({ 
+    status: 'User routes are deprecated',
+    message: 'Authentication is now handled by worXstream backend'
+  });
+});
 
 export default router;
