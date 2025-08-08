@@ -157,11 +157,9 @@ export const initMailSocket = (socket, io) => {
       console.log('📧 Messages needing enrichment:', messagesNeedingEnrichment.length);
       
       if (messagesNeedingEnrichment.length > 0) {
-        // Register this socket with the enrichment service for this user
-        emailEnrichmentService.registerSocket(socket);
-        
-        // Add to queue for processing
-        await enrichmentQueueService.addToQueue(messagesNeedingEnrichment);
+        // Pass the socket instance directly to the enrichment queue service
+        // This ensures we use the same socket that made the request
+        await enrichmentQueueService.addToQueue(messagesNeedingEnrichment, socket);
         
         console.log('✅ Enrichment request queued successfully');
       } else {

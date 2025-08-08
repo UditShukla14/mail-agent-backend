@@ -171,6 +171,7 @@ class EmailEnrichmentService {
       const matches = String(socketUserId) === String(worxstreamUserId);
       if (matches) {
         console.log(`✅ Found socket for user ${worxstreamUserId}: ${socket.id}`);
+        console.log(`📧 Socket details: connected=${socket.connected}, userInfo=${JSON.stringify(socket.userInfo)}`);
       }
       return matches;
     });
@@ -179,7 +180,7 @@ class EmailEnrichmentService {
       console.log(`❌ No socket found for user ${worxstreamUserId}`);
       // Log all available sockets for debugging
       sockets.forEach(socket => {
-        console.log(`📡 Socket ${socket.id}: worxstreamUserId = ${socket.worxstreamUserId}`);
+        console.log(`📡 Socket ${socket.id}: worxstreamUserId = ${socket.worxstreamUserId}, connected = ${socket.connected}`);
       });
     }
     

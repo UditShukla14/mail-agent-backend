@@ -15,9 +15,10 @@ class EnrichmentQueueService {
     this.processingEmails = new Set(); // Track emails currently being processed
   }
 
-  async addToQueue(emails) {
+  async addToQueue(emails, socket = null) {
     try {
       console.log(`📧 Adding ${emails.length} emails to enrichment queue`);
+      console.log(`📧 Socket provided: ${!!socket}`);
       
       // Validate emails before adding to queue
       const validEmails = emails.filter(email => {
@@ -59,7 +60,13 @@ class EnrichmentQueueService {
       // Add emails to processing set to prevent duplicates
       notProcessingEmails.forEach(email => this.processingEmails.add(email.id));
       
-      this.queue.push(...notProcessingEmails);
+      // Store the socket with the emails for processing
+      const queueItem = {
+        emails: notProcessingEmails,
+        socket: socket
+      };
+      
+      this.queue.push(queueItem);
       console.log(`📧 Added ${notProcessingEmails.length} emails to queue. Queue length: ${this.queue.length}`);
       
       // Start processing if not already running
@@ -104,13 +111,13 @@ class EnrichmentQueueService {
 
     try {
       while (this.queue.length > 0) {
-        const batch = this.queue.splice(0, this.batchSize);
-        console.log(`📧 Processing batch of ${batch.length} emails from queue`);
+        const queueItem = this.queue.splice(0, 1)[0]; // Take one item at a time
+        console.log(`📧 Processing queue item with ${queueItem.emails.length} emails`);
         
-        await this.processBatch(batch);
+        await this.processBatch(queueItem.emails, queueItem.socket);
         
         // Clear processing state for this batch
-        batch.forEach(email => this.processingEmails.delete(email.id));
+        queueItem.emails.forEach(email => this.processingEmails.delete(email.id));
         
         // Add delay between batches if there are more emails
         if (this.queue.length > 0) {
@@ -127,8 +134,9 @@ class EnrichmentQueueService {
     }
   }
 
-  async processBatch(batch) {
+  async processBatch(batch, socket = null) {
     console.log(`📧 Processing batch of ${batch.length} emails`);
+    console.log(`📧 Socket provided for batch: ${!!socket}`);
     
     // Filter out already enriched emails and validate required fields
     const unprocessedEmails = batch.filter(email => {
@@ -184,25 +192,23 @@ class EnrichmentQueueService {
         
         console.log(`👤 Found user: ${user.worxstreamUserId} for email batch`);
         
-        // Create emit callback function that tries to emit to specific user
-        // but continues processing even if socket is not available
+        // Create emit callback function that uses the provided socket or falls back to finding the user's socket
         const emitCallback = (event, data) => {
           console.log(`📡 EmitCallback called for event: ${event}`, data);
           try {
-            if (emailEnrichmentService.io) {
-              // Find the specific user's socket and emit to them
-              const userSocket = emailEnrichmentService.findUserSocket(user.worxstreamUserId);
-              if (userSocket) {
-                console.log(`📤 Emitting ${event} to socket ${userSocket.id}`);
-                userSocket.emit(event, data);
-                console.log(`✅ Successfully emitted ${event} to socket ${userSocket.id}`);
-              } else {
-                // User socket not found - this is normal when user is not on mail page
-                // Don't retry or broadcast - just log and continue
-                console.log(`📡 User ${user.worxstreamUserId} socket not found for ${event}, continuing processing...`);
-              }
+            // Use the provided socket if available, otherwise fall back to finding the user's socket
+            const targetSocket = socket || (emailEnrichmentService.io ? emailEnrichmentService.findUserSocket(user.worxstreamUserId) : null);
+            
+            if (targetSocket) {
+              console.log(`📤 Emitting ${event} to socket ${targetSocket.id}`);
+              console.log(`📧 Socket details: connected=${targetSocket.connected}, worxstreamUserId=${targetSocket.worxstreamUserId}`);
+              console.log(`📧 Event data being sent:`, JSON.stringify(data, null, 2));
+              targetSocket.emit(event, data);
+              console.log(`✅ Successfully emitted ${event} to socket ${targetSocket.id}`);
             } else {
-              console.log(`❌ EmailEnrichmentService.io not available for ${event}`);
+              // Socket not found - this is normal when user is not on mail page
+              // Don't retry or broadcast - just log and continue
+              console.log(`📡 No socket available for ${event}, continuing processing...`);
             }
           } catch (error) {
             // Socket error - don't fail the enrichment process
