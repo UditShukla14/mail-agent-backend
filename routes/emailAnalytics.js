@@ -1,7 +1,5 @@
 import express from 'express';
-import { getEmailStats } from '../controllers/basicAnalyticsController.js';
-import { getEmailAnalytics } from '../controllers/advancedAnalyticsController.js';
-import { getUnreadEmailsSummary } from '../controllers/summaryAnalyticsController.js';
+import { getEmailStats, getEmailAnalytics, getUnreadEmailsSummary } from '../controllers/emailAnalyticsController.js';
 import { authenticateUser } from '../middleware/auth.js';
 
 const router = express.Router();
