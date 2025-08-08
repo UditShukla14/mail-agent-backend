@@ -1,4 +1,3 @@
-import { processEnrichmentBatch } from './enrichmentProcessor.js';
 import Email from '../models/email.js';
 import emailEnrichmentService from './emailEnrichment.js';
 import User from '../models/User.js';
@@ -181,7 +180,7 @@ class EnrichmentQueueService {
         };
         
         // Process the entire batch using the rate-limited processor
-        await processEnrichmentBatch(emailBatch, emitCallback);
+        await emailEnrichmentService.processEnrichmentBatch(emailBatch, emitCallback);
 
         // Rate limiting is handled by the processor, no additional delay needed
       } catch (error) {
