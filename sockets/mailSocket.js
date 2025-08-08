@@ -245,7 +245,7 @@ export const initMailSocket = (socket, io) => {
       const savedMessages = await Promise.all(messages.map(async msg => {
         try {
           // First check if message exists and get its current state
-          const existingMessage = await Email.findOne({ id: msg.id });
+          const existingMessage = await Email.findOne({ id: msg.id, email: email });
           
           // If message exists and hasn't changed, return it
           if (existingMessage && 
@@ -294,7 +294,7 @@ export const initMailSocket = (socket, io) => {
 
           // Only update if message is new or has changed
           const savedMsg = await Email.findOneAndUpdate(
-            { id: msg.id },
+            { id: msg.id, email: email },
             { $set: emailData },
             { 
               upsert: true, 
@@ -480,7 +480,7 @@ export const initMailSocket = (socket, io) => {
   socket.on('mail:retryEnrichment', async ({ worxstreamUserId, email, messageId }) => {
     console.log('🔄 Retry enrichment requested for:', { worxstreamUserId, email, messageId });
     try {
-      const emailDoc = await Email.findOne({ id: messageId });
+      const emailDoc = await Email.findOne({ id: messageId, email: email });
       if (!emailDoc) {
         console.error('❌ Email not found:', messageId);
         socket.emit('mail:error', 'Email not found');
@@ -586,7 +586,7 @@ export const initMailSocket = (socket, io) => {
       }
 
       // Find the email document
-      const emailDoc = await Email.findOne({ id: messageId, userId: user._id });
+      const emailDoc = await Email.findOne({ id: messageId, email: email });
       if (!emailDoc) {
         console.error('❌ Email not found:', messageId);
         return socket.emit('mail:error', 'Email not found');

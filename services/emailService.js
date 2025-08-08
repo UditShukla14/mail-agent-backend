@@ -72,7 +72,7 @@ class EmailService {
           }
 
           const savedMsg = await Email.findOneAndUpdate(
-            { id: msg.id },
+            { id: msg.id, email: email },
             { $set: emailData },
             { 
               upsert: true, 
@@ -137,7 +137,7 @@ class EmailService {
       }
 
       // Get AI metadata from database first
-      let dbMessage = await Email.findOne({ id: messageId });
+      let dbMessage = await Email.findOne({ id: messageId, email: email });
       let aiMetadata = null;
       
       if (dbMessage) {
@@ -211,10 +211,10 @@ class EmailService {
   }
 
   // New method to mark message as processed
-  async markMessageAsProcessed(messageId) {
+  async markMessageAsProcessed(messageId, email) {
     try {
       await Email.findOneAndUpdate(
-        { id: messageId },
+        { id: messageId, email: email },
         { $set: { isProcessed: true } }
       );
     } catch (error) {
@@ -226,13 +226,13 @@ class EmailService {
   async deleteMessage(worxstreamUserId, email, messageId) {
     try {
       // Get the message to check its folder and read status
-      const message = await Email.findOne({ id: messageId });
+      const message = await Email.findOne({ id: messageId, email: email });
       if (!message) {
         throw new Error('Message not found');
       }
 
       // Delete the message
-      await Email.deleteOne({ id: messageId });
+      await Email.deleteOne({ id: messageId, email: email });
 
       // Update folder counts
       if (message.folder) {

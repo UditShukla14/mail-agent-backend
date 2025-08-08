@@ -57,15 +57,26 @@ export const getToken = async (worxstreamUserId, email, provider) => {
     const { expires_in, timestamp } = tokenDoc;
 
     const isExpired = Date.now() > timestamp + expires_in * 1000 - 60000;
+    console.log('🔍 Debug: Token expiration check:', {
+      email,
+      isExpired,
+      currentTime: Date.now(),
+      tokenTimestamp: timestamp,
+      expiresIn: expires_in,
+      expirationTime: timestamp + expires_in * 1000 - 60000
+    });
+    
     if (!isExpired) {
       // Cache the valid token
       tokenCache.set(cacheKey, {
         token: access_token,
         timestamp: Date.now()
       });
+      console.log('🔍 Debug: Using valid cached token for:', email);
       return access_token;
     }
 
+    console.log('🔍 Debug: Token expired, attempting refresh for:', email);
     const refreshed = await refreshToken(refresh_token, provider);
     if (refreshed) {
       tokenDoc.access_token = refreshed.access_token;
@@ -164,6 +175,8 @@ export const saveToken = async (worxstreamUserId, email, tokenResponse, provider
 // 🔁 Refresh token using provider-specific logic
 const refreshToken = async (refresh_token, provider) => {
   try {
+    console.log(`🔄 Starting token refresh for provider: ${provider}`);
+    
     let url, data;
 
     if (provider === 'outlook') {
@@ -185,11 +198,18 @@ const refreshToken = async (refresh_token, provider) => {
       });
     }
 
+    console.log(`🔄 Making refresh request to: ${url}`);
     const res = await axios.post(url, data, {
       headers: { "Content-Type": "application/x-www-form-urlencoded" }
     });
 
     const { access_token, refresh_token: new_refresh, expires_in } = res.data;
+    
+    console.log(`✅ Token refresh successful for ${provider}:`, {
+      hasAccessToken: !!access_token,
+      hasRefreshToken: !!new_refresh,
+      expiresIn: expires_in
+    });
 
     return {
       access_token,
@@ -199,6 +219,12 @@ const refreshToken = async (refresh_token, provider) => {
     };
   } catch (err) {
     console.error(`🔴 Token refresh failed (${provider}):`, err?.response?.data || err.message);
+    console.error(`🔴 Full error details:`, {
+      status: err.response?.status,
+      statusText: err.response?.statusText,
+      data: err.response?.data,
+      message: err.message
+    });
     return null;
   }
 };
@@ -222,20 +248,63 @@ export const deleteToken = async (worxstreamUserId, email, provider) => {
   }
 };
 
-// 📋 Get all tokens for a user
+// 📋 Get all tokens for a user (with automatic refresh)
 export const getUserTokens = async (worxstreamUserId) => {
   try {
     // Ensure worxstreamUserId is a number
     const numericUserId = Number(worxstreamUserId);
     const tokens = await Token.find({ worxstreamUserId: numericUserId });
     
-    return tokens.map(token => ({
-      email: token.email,
-      provider: token.provider,
-      expires_in: token.expires_in,
-      timestamp: token.timestamp,
-      isExpired: Date.now() > token.timestamp + token.expires_in * 1000 - 60000
-    }));
+    const refreshedTokens = [];
+    
+    for (const token of tokens) {
+      const isExpired = Date.now() > token.timestamp + token.expires_in * 1000 - 60000;
+      
+      if (isExpired) {
+        console.log(`🔄 Token for ${token.email} is expired, attempting refresh...`);
+        // Try to refresh the token
+        const refreshed = await refreshToken(token.refresh_token, token.provider);
+        
+        if (refreshed) {
+          // Update the token in the database
+          token.access_token = refreshed.access_token;
+          token.refresh_token = refreshed.refresh_token;
+          token.expires_in = refreshed.expires_in;
+          token.timestamp = refreshed.timestamp;
+          await token.save();
+          
+          console.log(`✅ Successfully refreshed token for ${token.email}`);
+          
+          refreshedTokens.push({
+            email: token.email,
+            provider: token.provider,
+            expires_in: refreshed.expires_in,
+            timestamp: refreshed.timestamp,
+            isExpired: false // Token is now fresh
+          });
+        } else {
+          console.log(`❌ Failed to refresh token for ${token.email}`);
+          refreshedTokens.push({
+            email: token.email,
+            provider: token.provider,
+            expires_in: token.expires_in,
+            timestamp: token.timestamp,
+            isExpired: true
+          });
+        }
+      } else {
+        // Token is still valid
+        refreshedTokens.push({
+          email: token.email,
+          provider: token.provider,
+          expires_in: token.expires_in,
+          timestamp: token.timestamp,
+          isExpired: false
+        });
+      }
+    }
+    
+    return refreshedTokens;
   } catch (err) {
     console.error(`❌ Error getting tokens for worxstreamUserId ${worxstreamUserId}:`, err);
     return [];
@@ -246,6 +315,43 @@ export const getUserTokens = async (worxstreamUserId) => {
 export const clearTokenCache = () => {
   tokenCache.clear();
   console.log('🗑️ Token cache cleared');
+};
+
+// 🔄 Manually refresh a specific token
+export const refreshSpecificToken = async (worxstreamUserId, email, provider) => {
+  try {
+    console.log(`🔄 Manually refreshing token for ${email} (${provider})`);
+    
+    const numericUserId = Number(worxstreamUserId);
+    const tokenDoc = await Token.findOne({ worxstreamUserId: numericUserId, email, provider });
+    
+    if (!tokenDoc) {
+      console.log(`❌ No token found for ${email}`);
+      return false;
+    }
+    
+    const refreshed = await refreshToken(tokenDoc.refresh_token, provider);
+    if (refreshed) {
+      tokenDoc.access_token = refreshed.access_token;
+      tokenDoc.refresh_token = refreshed.refresh_token;
+      tokenDoc.expires_in = refreshed.expires_in;
+      tokenDoc.timestamp = refreshed.timestamp;
+      await tokenDoc.save();
+      
+      // Clear cache for this token
+      const cacheKey = `${numericUserId}:${email}:${provider}`;
+      tokenCache.delete(cacheKey);
+      
+      console.log(`✅ Successfully refreshed token for ${email}`);
+      return true;
+    } else {
+      console.log(`❌ Failed to refresh token for ${email}`);
+      return false;
+    }
+  } catch (err) {
+    console.error(`❌ Error refreshing token for ${email}:`, err);
+    return false;
+  }
 };
 
 // Get cache stats (useful for debugging)

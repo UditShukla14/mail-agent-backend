@@ -5,7 +5,7 @@ import Email from '../models/email.js';
 import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
 import { authenticateUser } from '../middleware/auth.js';
-import { getUserTokens, deleteToken } from '../utils/tokenManager.js';
+import { getUserTokens, deleteToken, refreshSpecificToken } from '../utils/tokenManager.js';
 
 const router = express.Router();
 
@@ -135,6 +135,44 @@ router.get('/accounts', authenticateUser, async (req, res) => {
       success: false,
       error: 'Failed to fetch accounts',
       details: error.message 
+    });
+  }
+});
+
+// Refresh a specific token
+router.post('/refresh-token', authenticateUser, async (req, res) => {
+  try {
+    const worxstreamUserId = req.user.id;
+    const { email, provider = 'outlook' } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Missing email parameter' 
+      });
+    }
+
+    console.log(`🔄 Refreshing token for: ${email} (${provider}) for worXstream user: ${worxstreamUserId}`);
+
+    const success = await refreshSpecificToken(worxstreamUserId, email, provider);
+    
+    if (success) {
+      res.json({
+        success: true,
+        message: `Token refreshed successfully for ${email}`
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: `Failed to refresh token for ${email}`
+      });
+    }
+  } catch (error) {
+    console.error('Error refreshing token:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to refresh token',
+      details: error.message
     });
   }
 });

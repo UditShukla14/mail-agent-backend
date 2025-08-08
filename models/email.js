@@ -2,7 +2,7 @@
 import mongoose from 'mongoose';
 
 const emailSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true },
+  id: { type: String, required: true },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   email: { type: String, required: true },
   from: { type: String, required: true },
@@ -49,6 +49,8 @@ emailSchema.index({ userId: 1, folder: 1 });
 emailSchema.index({ userId: 1, timestamp: -1 });
 emailSchema.index({ userId: 1, 'aiMeta.category': 1 });
 emailSchema.index({ userId: 1, 'aiMeta.priority': 1 });
+// Compound unique index: message ID should be unique per email account
+emailSchema.index({ email: 1, id: 1 }, { unique: true });
 
 const Email = mongoose.model('Email', emailSchema);
 export default Email;
