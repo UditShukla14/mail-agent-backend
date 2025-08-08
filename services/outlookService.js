@@ -345,24 +345,22 @@ async function searchMessages(accessToken, query, top = 20, nextLink = null) {
       return { messages: [], nextLink: null, totalCount: 0 };
     }
 
-    let url = 'https://graph.microsoft.com/v1.0/me/search/query';
-    let body;
-
+    let res;
     if (nextLink) {
-      // Pagination request
-      url = nextLink;
-      body = null;
+      console.log(`➡️ Fetching next page from nextLink`);
+      res = await axios.get(nextLink, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
     } else {
-      body = {
+      const url = 'https://graph.microsoft.com/v1.0/me/search/query';
+      const body = {
         requests: [
           {
-            entityTypes: ["message"], // Search only emails
-            query: { queryString: query }, // No quotes needed
+            entityTypes: ["message"],
+            query: { queryString: query },
             from: 0,
             size: top,
-            sortProperties: [
-              { name: "receivedDateTime", isDescending: true }
-            ],
+            sortProperties: [{ name: "receivedDateTime", isDescending: true }],
             fields: [
               "id", "subject", "from", "toRecipients", "ccRecipients", "bccRecipients",
               "bodyPreview", "receivedDateTime", "isRead", "importance", "flag", "conversationId"
@@ -370,16 +368,15 @@ async function searchMessages(accessToken, query, top = 20, nextLink = null) {
           }
         ]
       };
+
+      console.log(`🌐 Calling Microsoft Graph Search API: ${url}`);
+      res = await axios.post(url, body, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
     }
-
-    console.log(`🌐 Calling Microsoft Graph Search API: ${url}`);
-
-    const res = await axios.post(url, body, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      }
-    });
 
     const rawResults = res.data.value?.[0]?.hitsContainers?.[0]?.hits || [];
     console.log(`📊 Search API returned ${rawResults.length} hits`);
@@ -396,7 +393,7 @@ async function searchMessages(accessToken, query, top = 20, nextLink = null) {
         preview: msg.bodyPreview || '',
         timestamp: msg.receivedDateTime,
         read: msg.isRead || false,
-        folder: null, // Cross-folder search
+        folder: null,
         important: msg.importance === "high",
         flagged: msg.flag?.flagStatus === "flagged",
         conversationId: msg.conversationId
@@ -406,11 +403,10 @@ async function searchMessages(accessToken, query, top = 20, nextLink = null) {
         console.error('❌ Search result missing required fields:', mappedMsg);
         return null;
       }
-
       return mappedMsg;
     }).filter(Boolean);
 
-    console.log(`✅ Search completed. Found ${messages.length} messages matching query "${query}"`);
+    console.log(`✅ Search completed. Found ${messages.length} messages`);
 
     return {
       messages,
@@ -426,6 +422,7 @@ async function searchMessages(accessToken, query, top = 20, nextLink = null) {
     return { messages: [], nextLink: null, totalCount: 0 };
   }
 }
+
 
 
 
