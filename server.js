@@ -15,8 +15,11 @@ import accountRoutes from './routes/account.js';
 import emailAnalyticsRoutes from './routes/emailAnalytics.js';
 import emailCategoriesRoutes from './routes/emailCategories.js';
 import aiReplyRoutes from './routes/aiReply.js';
+import tokenRefreshRoutes from './routes/tokenRefresh.js';
 
 import './services/enrichmentQueueService.js'; // This will initialize the service
+import tokenRefreshService from './services/tokenRefreshService.js';
+import notificationService from './services/notificationService.js';
 
 dotenv.config();
 
@@ -97,6 +100,9 @@ const io = new Server(httpServer, {
 // Set the IO instance for the email enrichment service
 emailEnrichmentService.setIO(io);
 
+// Set the IO instance for the notification service
+notificationService.setIO(io);
+
 // Memory management and cleanup
 const cleanup = () => {
   console.log('🧹 Running memory cleanup...');
@@ -141,6 +147,7 @@ app.use('/account', accountRoutes);
 app.use('/email-analytics', emailAnalyticsRoutes);
 app.use('/email-categories', emailCategoriesRoutes);
 app.use('/ai-reply', aiReplyRoutes);
+app.use('/token-refresh', tokenRefreshRoutes);
 
 // Health check endpoint
 app.get('/', (req, res) => {
@@ -264,4 +271,8 @@ const PORT = process.env.PORT || 8000;
 httpServer.listen(PORT, () => {
   console.log(`🚀 Mail Agent Backend running on port ${PORT}`);
   console.log(`🔗 Integrated with worXstream backend: ${process.env.WORXSTREAM_API_URL || 'http://localhost:8080'}`);
+  
+  // Start the token refresh service
+  tokenRefreshService.start();
+  console.log('🔄 Token refresh service started');
 });

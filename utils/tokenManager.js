@@ -93,6 +93,18 @@ export const getToken = async (worxstreamUserId, email, provider) => {
       return refreshed.access_token;
     }
 
+    // If refresh failed, mark the token as expired in EmailAccount
+    try {
+      const EmailAccount = (await import('../models/EmailAccount.js')).default;
+      await EmailAccount.findOneAndUpdate(
+        { email, provider },
+        { isExpired: true }
+      );
+      console.log(`⚠️ Marked ${email} as expired in EmailAccount due to refresh failure`);
+    } catch (emailAccountError) {
+      console.error(`❌ Failed to update EmailAccount for ${email}:`, emailAccountError);
+    }
+
     return null;
   } catch (err) {
     console.error(`❌ Error getting token for ${email}:`, err);
@@ -173,14 +185,14 @@ export const saveToken = async (worxstreamUserId, email, tokenResponse, provider
 };
 
 // 🔁 Refresh token using provider-specific logic
-const refreshToken = async (refresh_token, provider) => {
+export const refreshToken = async (refresh_token, provider) => {
   try {
     console.log(`🔄 Starting token refresh for provider: ${provider}`);
     
     let url, data;
 
     if (provider === 'outlook') {
-      url = `https://login.microsoftonline.com/${process.env.TENANT_ID}/oauth2/v2.0/token`;
+      url = `https://login.microsoftonline.com/common/oauth2/v2.0/token`;
       data = new URLSearchParams({
         client_id: process.env.CLIENT_ID,
         client_secret: process.env.CLIENT_SECRET,
@@ -191,8 +203,8 @@ const refreshToken = async (refresh_token, provider) => {
     } else if (provider === 'gmail') {
       url = 'https://oauth2.googleapis.com/token';
       data = new URLSearchParams({
-        client_id: process.env.GOOGLE_CLIENT_ID,
-        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        client_id: process.env.GMAIL_CLIENT_ID,
+        client_secret: process.env.GMAIL_CLIENT_SECRET,
         refresh_token,
         grant_type: "refresh_token"
       });
@@ -225,6 +237,16 @@ const refreshToken = async (refresh_token, provider) => {
       data: err.response?.data,
       message: err.message
     });
+    
+    // Check if the refresh token itself is invalid
+    if (err.response?.status === 400 || err.response?.status === 401) {
+      const errorData = err.response?.data;
+      if (errorData?.error === 'invalid_grant' || errorData?.error_description?.includes('refresh')) {
+        console.log(`🔴 Refresh token is invalid for ${provider}, user needs to re-authenticate`);
+        // The user will need to re-authenticate to get a new refresh token
+      }
+    }
+    
     return null;
   }
 };
