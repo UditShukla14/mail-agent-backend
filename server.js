@@ -14,7 +14,6 @@ import userRoutes from './routes/user.js';
 import accountRoutes from './routes/account.js';
 import emailAnalyticsRoutes from './routes/emailAnalytics.js';
 import emailCategoriesRoutes from './routes/emailCategories.js';
-import emailSearchRoutes from './routes/emailSearch.js';
 import aiReplyRoutes from './routes/aiReply.js';
 
 import './services/enrichmentQueueService.js'; // This will initialize the service
@@ -141,7 +140,6 @@ app.use('/auth', authRoutes);
 app.use('/account', accountRoutes);
 app.use('/email-analytics', emailAnalyticsRoutes);
 app.use('/email-categories', emailCategoriesRoutes);
-app.use('/email-search', emailSearchRoutes);
 app.use('/ai-reply', aiReplyRoutes);
 
 // Health check endpoint
