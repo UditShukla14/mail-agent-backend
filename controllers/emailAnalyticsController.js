@@ -45,7 +45,7 @@ const formatVolumeOverTime = (volumeData) => {
 export const getEmailStats = async (req, res) => {
   try {
     const { email: queryEmail, folderId } = req.query;
-    const worxstreamUserId = req.user.id;
+    const worxstreamUserId = Number(req.user.id);
 
     if (!worxstreamUserId) {
       return res.status(401).json({ 
@@ -54,15 +54,8 @@ export const getEmailStats = async (req, res) => {
       });
     }
 
-    // Use the email from query params if provided, otherwise use user's email
-    const targetEmail = queryEmail || req.user.email;
-
-    if (!targetEmail) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Email parameter required' 
-      });
-    }
+    // Use the email from query params if provided, otherwise use all connected email accounts
+    const targetEmail = queryEmail || null;
 
     // Get user from database using worxstreamUserId
     const user = await User.findOne({ worxstreamUserId });
@@ -103,8 +96,8 @@ export const getEmailStats = async (req, res) => {
       matchCriteria.email = targetEmail;
     }
     
-    // Add folder filter if provided and not 'all'
-    if (folderId && folderId !== 'all') {
+    // Add folder filter if provided and not 'all' or 'Inbox' (since Inbox is a display name, not folder ID)
+    if (folderId && folderId !== 'all' && folderId !== 'Inbox') {
       matchCriteria.folder = folderId;
     }
 
@@ -151,7 +144,7 @@ export const getEmailStats = async (req, res) => {
 export const getEmailAnalytics = async (req, res) => {
   try {
     const { email: queryEmail, folderId } = req.query;
-    const worxstreamUserId = req.user.id;
+    const worxstreamUserId = Number(req.user.id);
 
     if (!worxstreamUserId) {
       return res.status(401).json({ 
@@ -160,15 +153,8 @@ export const getEmailAnalytics = async (req, res) => {
       });
     }
 
-    // Use the email from query params if provided, otherwise use user's email
-    const targetEmail = queryEmail || req.user.email;
-
-    if (!targetEmail) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Email parameter required' 
-      });
-    }
+    // Use the email from query params if provided, otherwise use all connected email accounts
+    const targetEmail = queryEmail || null;
 
     // Get user from database using worxstreamUserId
     const user = await User.findOne({ worxstreamUserId });
@@ -210,8 +196,8 @@ export const getEmailAnalytics = async (req, res) => {
       baseMatchCriteria.email = targetEmail;
     }
     
-    // Add folder filter if provided and not 'all'
-    if (folderId && folderId !== 'all') {
+    // Add folder filter if provided and not 'all' or 'Inbox' (since Inbox is a display name, not folder ID)
+    if (folderId && folderId !== 'all' && folderId !== 'Inbox') {
       baseMatchCriteria.folder = folderId;
     }
     
@@ -225,12 +211,18 @@ export const getEmailAnalytics = async (req, res) => {
     if (enrichedCount === 0) {
       const unenrichedMatchCriteria = { 
         userId: user._id,
-        email: targetEmail,
         $or: [
           { 'aiMeta.enrichedAt': { $exists: false } },
           { 'aiMeta.enrichedAt': null }
         ]
       };
+      
+      // Add email filter only if targetEmail is specified
+      if (targetEmail) {
+        unenrichedMatchCriteria.email = targetEmail;
+      } else {
+        unenrichedMatchCriteria.email = { $in: userEmails };
+      }
       
       if (folderId) {
         unenrichedMatchCriteria.folder = folderId;
@@ -435,7 +427,7 @@ export const getEmailAnalytics = async (req, res) => {
 export const getUnreadEmailsSummary = async (req, res) => {
   try {
     const { email: queryEmail, folderId, timePeriod = '24h' } = req.query;
-    const worxstreamUserId = req.user.id;
+    const worxstreamUserId = Number(req.user.id);
 
     if (!worxstreamUserId) {
       return res.status(401).json({ 
@@ -444,15 +436,8 @@ export const getUnreadEmailsSummary = async (req, res) => {
       });
     }
 
-    // Use the email from query params if provided, otherwise use user's email
-    const targetEmail = queryEmail || req.user.email;
-
-    if (!targetEmail) {
-      return res.status(400).json({ 
-        success: false,
-        error: 'Email parameter required' 
-      });
-    }
+    // Use the email from query params if provided, otherwise use all connected email accounts
+    const targetEmail = queryEmail || null;
 
     // Get user from database using worxstreamUserId
     const user = await User.findOne({ worxstreamUserId });
@@ -511,8 +496,8 @@ export const getUnreadEmailsSummary = async (req, res) => {
       matchCriteria.email = targetEmail;
     }
     
-    // Add folder filter if provided and not 'all'
-    if (folderId && folderId !== 'all') {
+    // Add folder filter if provided and not 'all' or 'Inbox' (since Inbox is a display name, not folder ID)
+    if (folderId && folderId !== 'all' && folderId !== 'Inbox') {
       matchCriteria.folder = folderId;
     }
 
