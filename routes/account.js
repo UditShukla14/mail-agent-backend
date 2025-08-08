@@ -6,6 +6,8 @@ import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
 import { authenticateUser } from '../middleware/auth.js';
 import { getUserTokens, deleteToken } from '../utils/tokenManager.js';
+import { searchMessages as searchOutlookMessages } from '../services/outlookService.js';
+import { searchMessages as searchGmailMessages } from '../services/gmailService.js';
 
 const router = express.Router();
 
@@ -162,6 +164,151 @@ router.delete('/unlink', authenticateUser, async (req, res) => {
     res.status(500).json({ 
       success: false,
       error: 'Failed to unlink account',
+      details: error.message 
+    });
+  }
+});
+
+// Search messages across email accounts
+router.post('/search', authenticateUser, async (req, res) => {
+  try {
+    const worxstreamUserId = req.user.id;
+    const { query, email, folderId, page = 1, limit = 20 } = req.body;
+    
+    if (!query || !email) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Missing required parameters: query and email' 
+      });
+    }
+
+    console.log(`🔍 Search request for user ${worxstreamUserId}, email: ${email}, query: "${query}"`);
+
+    // Get user token for the specified email
+    const tokens = await getUserTokens(worxstreamUserId);
+    const token = tokens.find(t => t.email === email);
+    
+    if (!token) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Email account not found or not connected' 
+      });
+    }
+
+    if (token.isExpired) {
+      return res.status(401).json({ 
+        success: false,
+        error: 'Email account token has expired. Please reconnect your account.' 
+      });
+    }
+
+    let searchResult;
+    
+    if (token.provider === 'outlook') {
+      searchResult = await searchOutlookMessages(
+        token.accessToken, 
+        query, 
+        folderId, 
+        limit
+      );
+    } else if (token.provider === 'gmail') {
+      searchResult = await searchGmailMessages(
+        token.accessToken, 
+        query, 
+        folderId, 
+        limit
+      );
+    } else {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Unsupported email provider' 
+      });
+    }
+
+    console.log(`✅ Search completed. Found ${searchResult.messages.length} messages`);
+
+    res.json({
+      success: true,
+      data: {
+        messages: searchResult.messages,
+        nextLink: searchResult.nextLink,
+        totalCount: searchResult.totalCount,
+        query,
+        email,
+        folderId
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error searching messages:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to search messages',
+      details: error.message 
+    });
+  }
+});
+
+// Get folders for a specific email account
+router.get('/folders', authenticateUser, async (req, res) => {
+  try {
+    const worxstreamUserId = req.user.id;
+    const { email } = req.query;
+    
+    if (!email) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Missing email parameter' 
+      });
+    }
+
+    console.log(`📂 Getting folders for user ${worxstreamUserId}, email: ${email}`);
+
+    // Get user token for the specified email
+    const tokens = await getUserTokens(worxstreamUserId);
+    const token = tokens.find(t => t.email === email);
+    
+    if (!token) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Email account not found or not connected' 
+      });
+    }
+
+    if (token.isExpired) {
+      return res.status(401).json({ 
+        success: false,
+        error: 'Email account token has expired. Please reconnect your account.' 
+      });
+    }
+
+    let folders;
+    
+    if (token.provider === 'outlook') {
+      const { getMailFolders } = await import('../services/outlookService.js');
+      folders = await getMailFolders(token.accessToken);
+    } else if (token.provider === 'gmail') {
+      const { getMailFolders } = await import('../services/gmailService.js');
+      folders = await getMailFolders(token.accessToken);
+    } else {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Unsupported email provider' 
+      });
+    }
+
+    console.log(`✅ Retrieved ${folders.length} folders for ${email}`);
+
+    res.json({
+      success: true,
+      data: folders
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching folders:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch folders',
       details: error.message 
     });
   }

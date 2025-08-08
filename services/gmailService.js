@@ -250,12 +250,89 @@ async function deleteMessage(accessToken, messageId) {
   }
 }
 
-export {
-  getMailFolders,
-  getMessagesByFolder,
-  getMessageById,
-  markMessageRead,
-  markMessageImportant,
-  sendEmail,
-  deleteMessage
-}; 
+// search messages using Gmail API search
+async function searchMessages(accessToken, query, folderId = null, maxResults = 20, nextPageToken = null) {
+  try {
+    console.log(`🔍 Searching Gmail messages with query: "${query}"`);
+    
+    const gmail = getGmailClient(accessToken);
+    
+    // Build search query
+    let searchQuery = query;
+    if (folderId && folderId !== 'INBOX') {
+      // Add label filter to search query
+      searchQuery = `label:${folderId} ${query}`;
+    }
+    
+    const response = await gmail.users.messages.list({
+      userId: 'me',
+      q: searchQuery,
+      maxResults,
+      pageToken: nextPageToken
+    });
+
+    if (!response.data.messages || response.data.messages.length === 0) {
+      console.log(`✅ No Gmail messages found matching search query`);
+      return { messages: [], nextLink: null, totalCount: 0 };
+    }
+
+    const messages = await Promise.all(
+      response.data.messages.map(async (message) => {
+        const fullMessage = await gmail.users.messages.get({
+          userId: 'me',
+          id: message.id,
+          format: 'full'
+        });
+
+        const headers = fullMessage.data.payload.headers;
+        const subject = headers.find(h => h.name === 'Subject')?.value || '(No Subject)';
+        const from = headers.find(h => h.name === 'From')?.value || '';
+        const to = headers.find(h => h.name === 'To')?.value || '';
+        const cc = headers.find(h => h.name === 'Cc')?.value || '';
+        const bcc = headers.find(h => h.name === 'Bcc')?.value || '';
+        
+        // Get message body
+        let content = '';
+        if (fullMessage.data.payload.parts) {
+          const textPart = fullMessage.data.payload.parts.find(
+            part => part.mimeType === 'text/plain'
+          );
+          if (textPart) {
+            content = Buffer.from(textPart.body.data, 'base64').toString();
+          }
+        } else if (fullMessage.data.payload.body.data) {
+          content = Buffer.from(fullMessage.data.payload.body.data, 'base64').toString();
+        }
+
+        return {
+          id: message.id,
+          from,
+          to,
+          cc,
+          bcc,
+          subject,
+          content,
+          preview: content.substring(0, 100),
+          timestamp: new Date(parseInt(fullMessage.data.internalDate)),
+          read: !fullMessage.data.labelIds.includes('UNREAD'),
+          folder: folderId || 'INBOX',
+          important: fullMessage.data.labelIds.includes('IMPORTANT'),
+          flagged: fullMessage.data.labelIds.includes('STARRED')
+        };
+      })
+    );
+
+    console.log(`✅ Found ${messages.length} Gmail messages matching search query`);
+    
+    return {
+      messages,
+      nextLink: response.data.nextPageToken,
+      totalCount: response.data.resultSizeEstimate || messages.length
+    };
+  } catch (err) {
+    console.error('❌ Failed to search Gmail messages:', err?.response?.data || err.message);
+    return { messages: [], nextLink: null, totalCount: 0 };
+  }
+}
+
+export { sendEmail, getMailFolders, getMessageById, getMessagesByFolder, markMessageRead, markMessageImportant, deleteMessage, searchMessages }; 
