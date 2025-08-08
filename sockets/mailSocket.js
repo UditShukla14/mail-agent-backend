@@ -40,6 +40,8 @@ export const initMailSocket = (socket, io) => {
   // Unified socket initialization - called when user logs into worXstream
   socket.on('unified:init', async ({ worxstreamUserId, userInfo }) => {
     try {
+      console.log('🔗 Unified socket initialization received:', { worxstreamUserId, userInfo });
+      
       // Store worxstreamUserId on socket for unified access
       socket.worxstreamUserId = worxstreamUserId;
       
@@ -51,6 +53,7 @@ export const initMailSocket = (socket, io) => {
       
       console.log(`🔗 Unified socket initialized for user: ${worxstreamUserId}`);
       socket.emit('unified:connected', { status: 'connected', userId: worxstreamUserId });
+      console.log('📤 Sent unified:connected event');
     } catch (error) {
       console.error('❌ Error initializing unified socket:', error);
       socket.emit('unified:error', { message: 'Failed to initialize unified socket' });
@@ -60,6 +63,8 @@ export const initMailSocket = (socket, io) => {
   // Mail-specific initialization (for when user navigates to mail page)
   socket.on('mail:init', async ({ worxstreamUserId, email }) => {
     try {
+      console.log('📧 Mail initialization for:', { worxstreamUserId, email });
+      
       // Store worxstreamUserId on socket for later use
       socket.worxstreamUserId = worxstreamUserId;
     
@@ -79,31 +84,91 @@ export const initMailSocket = (socket, io) => {
         }
       }
 
+      // Register this socket with the enrichment service for this user
+      emailEnrichmentService.registerSocket(socket);
+      console.log('✅ Socket registered with enrichment service');
+
       const folders = await getMailFolders(token);
       socket.emit('mail:folders', folders);
+      
+      console.log('✅ Mail initialization completed');
     } catch (error) {
       console.error('❌ Error in mail:init:', error);
       socket.emit('mail:error', 'Failed to initialize mail service');
     }
   });
 
+  // Test handler to verify socket communication
+  socket.on('mail:test', (data) => {
+    console.log('🧪 Test event received:', data);
+    socket.emit('mail:testResponse', { 
+      message: 'Test response from backend',
+      timestamp: new Date().toISOString(),
+      data: data
+    });
+    console.log('📤 Sent test response');
+  });
+
   // New handler for enriching specific emails
   socket.on('mail:enrichEmails', async ({ worxstreamUserId, email, messageIds }) => {
     try {
+      console.log('🔍 Enrichment request received:', { worxstreamUserId, email, messageIds: messageIds.length });
+      
+      // Send a test event immediately to verify socket communication
+      socket.emit('mail:enrichmentStatus', {
+        messageId: 'test-message-id',
+        status: 'analyzing',
+        message: 'Testing socket communication...'
+      });
+      console.log('📤 Sent test enrichment status event');
+      
+      // Send another test event after a short delay to verify ongoing communication
+      setTimeout(() => {
+        socket.emit('mail:enrichmentStatus', {
+          messageId: 'test-message-id-2',
+          status: 'completed',
+          message: 'Test communication successful!',
+          aiMeta: {
+            summary: 'This is a test summary',
+            category: 'test',
+            priority: 'medium',
+            sentiment: 'neutral',
+            actionItems: [],
+            enrichedAt: new Date().toISOString(),
+            version: '1.0'
+          }
+        });
+        console.log('📤 Sent second test enrichment status event');
+      }, 2000);
+      
       // Get the messages that need enrichment
       const messages = await Email.find({ id: { $in: messageIds } });
       
+      console.log('📧 Found messages in database:', messages.length);
+      
       if (messages.length === 0) {
+        console.log('❌ No messages found for enrichment');
         return;
       }
 
       // Filter out already enriched messages
       const messagesNeedingEnrichment = messages.filter(msg => !msg.aiMeta?.enrichedAt);
       
+      console.log('📧 Messages needing enrichment:', messagesNeedingEnrichment.length);
+      
       if (messagesNeedingEnrichment.length > 0) {
+        // Register this socket with the enrichment service for this user
+        emailEnrichmentService.registerSocket(socket);
+        
+        // Add to queue for processing
         await enrichmentQueueService.addToQueue(messagesNeedingEnrichment);
+        
+        console.log('✅ Enrichment request queued successfully');
+      } else {
+        console.log('✅ All messages already enriched');
       }
     } catch (error) {
+      console.error('❌ Error in mail:enrichEmails:', error);
       socket.emit('mail:error', 'Failed to start enrichment process');
     }
   });

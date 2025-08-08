@@ -98,6 +98,7 @@ class EmailEnrichmentService {
           aiMeta: cleanedAnalysis,
           email: updatedEmail
         });
+        console.log(`✅ Enrichment status emitted successfully for message ${email.id}`);
       } else {
         console.log(`❌ No user socket found for message ${email.id}`);
       }
@@ -141,25 +142,46 @@ class EmailEnrichmentService {
     }
     
     // Socket is already registered with IO, just log for tracking
-    console.log(`📡 Socket registered for user: ${socket.worxstreamUserId}`);
+    console.log(`📡 Socket registered for user: ${socket.worxstreamUserId} with socket ID: ${socket.id}`);
+    
+    // Verify the socket is actually in the IO sockets collection
+    const sockets = Array.from(this.io.sockets.sockets.values());
+    const foundSocket = sockets.find(s => s.id === socket.id);
+    if (foundSocket) {
+      console.log(`✅ Socket ${socket.id} confirmed in IO sockets collection`);
+    } else {
+      console.log(`❌ Socket ${socket.id} not found in IO sockets collection`);
+    }
   }
 
   // Helper method to find a user's socket
   findUserSocket(worxstreamUserId) {
     if (!this.io) {
+      console.log('❌ IO not available for socket lookup');
       return null;
     }
     
     // Get all connected sockets
     const sockets = Array.from(this.io.sockets.sockets.values());
+    console.log(`🔍 Looking for socket for user ${worxstreamUserId}, total sockets: ${sockets.length}`);
     
     // Find the socket that has this worxstreamUserId (handle both string and number types)
     const userSocket = sockets.find(socket => {
       const socketUserId = socket.worxstreamUserId;
-      
-      // Compare as strings to handle both number and string types
-      return String(socketUserId) === String(worxstreamUserId);
+      const matches = String(socketUserId) === String(worxstreamUserId);
+      if (matches) {
+        console.log(`✅ Found socket for user ${worxstreamUserId}: ${socket.id}`);
+      }
+      return matches;
     });
+    
+    if (!userSocket) {
+      console.log(`❌ No socket found for user ${worxstreamUserId}`);
+      // Log all available sockets for debugging
+      sockets.forEach(socket => {
+        console.log(`📡 Socket ${socket.id}: worxstreamUserId = ${socket.worxstreamUserId}`);
+      });
+    }
     
     return userSocket;
   }
@@ -283,6 +305,7 @@ class EmailEnrichmentService {
                     aiMeta: analysis,
                     email: updatedEmail
                   });
+                  console.log(`✅ Batch enrichment status emitted successfully for message ${email.id}`);
                 } else {
                   console.log(`❌ No user socket found for message ${email.id}`);
                 }

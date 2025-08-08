@@ -249,6 +249,11 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log('👋 Client disconnected:', socket.id);
   });
+  
+  // Add debugging for all events
+  socket.onAny((eventName, ...args) => {
+    console.log(`📨 Socket event received: ${eventName}`, args);
+  });
 });
 
 // Connect to MongoDB

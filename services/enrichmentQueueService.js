@@ -17,6 +17,8 @@ class EnrichmentQueueService {
 
   async addToQueue(emails) {
     try {
+      console.log(`📧 Adding ${emails.length} emails to enrichment queue`);
+      
       // Validate emails before adding to queue
       const validEmails = emails.filter(email => {
         if (!email || typeof email !== 'object') {
@@ -36,7 +38,10 @@ class EnrichmentQueueService {
         return true;
       });
       
+      console.log(`📧 Valid emails: ${validEmails.length}`);
+      
       if (validEmails.length === 0) {
+        console.log('❌ No valid emails to add to queue');
         return;
       }
 
@@ -44,7 +49,10 @@ class EnrichmentQueueService {
       const unenrichedEmails = await this.filterUnenrichedEmails(validEmails);
       const notProcessingEmails = unenrichedEmails.filter(email => !this.processingEmails.has(email.id));
       
+      console.log(`📧 Unenriched emails: ${unenrichedEmails.length}, Not processing: ${notProcessingEmails.length}`);
+      
       if (notProcessingEmails.length === 0) {
+        console.log('✅ All emails are already enriched or being processed');
         return;
       }
 
@@ -52,10 +60,14 @@ class EnrichmentQueueService {
       notProcessingEmails.forEach(email => this.processingEmails.add(email.id));
       
       this.queue.push(...notProcessingEmails);
+      console.log(`📧 Added ${notProcessingEmails.length} emails to queue. Queue length: ${this.queue.length}`);
       
       // Start processing if not already running
       if (!this.processing) {
+        console.log('🚀 Starting queue processing');
         this.processQueue();
+      } else {
+        console.log('⏳ Queue is already processing');
       }
     } catch (error) {
       console.error('❌ Error adding emails to queue:', error);
@@ -83,14 +95,17 @@ class EnrichmentQueueService {
 
   async processQueue() {
     if (this.processing) {
+      console.log('⏳ Queue is already processing, skipping');
       return;
     }
 
+    console.log('🚀 Starting queue processing');
     this.processing = true;
 
     try {
       while (this.queue.length > 0) {
         const batch = this.queue.splice(0, this.batchSize);
+        console.log(`📧 Processing batch of ${batch.length} emails from queue`);
         
         await this.processBatch(batch);
         
@@ -99,17 +114,21 @@ class EnrichmentQueueService {
         
         // Add delay between batches if there are more emails
         if (this.queue.length > 0) {
+          console.log(`⏳ Waiting ${this.rateLimitDelay/1000} seconds before next batch`);
           await new Promise(resolve => setTimeout(resolve, this.rateLimitDelay));
         }
       }
+      console.log('✅ Queue processing completed');
     } catch (error) {
       console.error('❌ Error in queue processing:', error);
     } finally {
       this.processing = false;
+      console.log('🏁 Queue processing finished');
     }
   }
 
   async processBatch(batch) {
+    console.log(`📧 Processing batch of ${batch.length} emails`);
     
     // Filter out already enriched emails and validate required fields
     const unprocessedEmails = batch.filter(email => {
@@ -135,7 +154,10 @@ class EnrichmentQueueService {
       return true;
     });
 
+    console.log(`📧 Unprocessed emails: ${unprocessedEmails.length}`);
+
     if (unprocessedEmails.length === 0) {
+      console.log('✅ No emails need processing in this batch');
       return false; // Return false to indicate no processing was needed
     }
 
@@ -150,6 +172,7 @@ class EnrichmentQueueService {
 
     for (const emailBatch of batches) {
       try {
+        console.log(`📧 Processing email batch of ${emailBatch.length} emails`);
         
         // Get the user for this batch to emit events to the correct user
         const firstEmail = emailBatch[0];
@@ -159,20 +182,27 @@ class EnrichmentQueueService {
           continue;
         }
         
+        console.log(`👤 Found user: ${user.worxstreamUserId} for email batch`);
+        
         // Create emit callback function that tries to emit to specific user
         // but continues processing even if socket is not available
         const emitCallback = (event, data) => {
+          console.log(`📡 EmitCallback called for event: ${event}`, data);
           try {
             if (emailEnrichmentService.io) {
               // Find the specific user's socket and emit to them
               const userSocket = emailEnrichmentService.findUserSocket(user.worxstreamUserId);
               if (userSocket) {
+                console.log(`📤 Emitting ${event} to socket ${userSocket.id}`);
                 userSocket.emit(event, data);
+                console.log(`✅ Successfully emitted ${event} to socket ${userSocket.id}`);
               } else {
                 // User socket not found - this is normal when user is not on mail page
                 // Don't retry or broadcast - just log and continue
                 console.log(`📡 User ${user.worxstreamUserId} socket not found for ${event}, continuing processing...`);
               }
+            } else {
+              console.log(`❌ EmailEnrichmentService.io not available for ${event}`);
             }
           } catch (error) {
             // Socket error - don't fail the enrichment process
@@ -181,7 +211,9 @@ class EnrichmentQueueService {
         };
         
         // Process the entire batch using the rate-limited processor
+        console.log(`📡 Calling processEnrichmentBatch with emitCallback for ${emailBatch.length} emails`);
         await processEnrichmentBatch(emailBatch, emitCallback);
+        console.log(`✅ processEnrichmentBatch completed for ${emailBatch.length} emails`);
 
         // Rate limiting is handled by the processor, no additional delay needed
       } catch (error) {
@@ -190,6 +222,7 @@ class EnrichmentQueueService {
       }
     }
 
+    console.log('✅ Batch processing completed successfully');
     return true; // Return true to indicate successful processing
   }
 
