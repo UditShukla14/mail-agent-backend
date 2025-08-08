@@ -90,9 +90,9 @@ export const getEmailStats = async (req, res) => {
       email: { $in: userEmails }
     };
     
-    // If specific email is requested and it exists in user's accounts, filter by that email
+    // If specific email is requested, filter by that email
     // Otherwise, use all user's email addresses
-    if (targetEmail && userEmails.includes(targetEmail)) {
+    if (targetEmail) {
       matchCriteria.email = targetEmail;
     }
     
@@ -190,9 +190,9 @@ export const getEmailAnalytics = async (req, res) => {
       email: { $in: userEmails }
     };
     
-    // If specific email is requested and it exists in user's accounts, filter by that email
+    // If specific email is requested, filter by that email
     // Otherwise, use all user's email addresses
-    if (targetEmail && userEmails.includes(targetEmail)) {
+    if (targetEmail) {
       baseMatchCriteria.email = targetEmail;
     }
     
@@ -490,9 +490,9 @@ export const getUnreadEmailsSummary = async (req, res) => {
       'aiMeta.summary': { $exists: true, $ne: null, $ne: '' }
     };
     
-    // If specific email is requested and it exists in user's accounts, filter by that email
+    // If specific email is requested, filter by that email
     // Otherwise, use all user's email addresses
-    if (targetEmail && userEmails.includes(targetEmail)) {
+    if (targetEmail) {
       matchCriteria.email = targetEmail;
     }
     
