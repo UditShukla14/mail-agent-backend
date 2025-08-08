@@ -5,7 +5,7 @@ dotenv.config();
 
 // API Configuration for worXstream backend
 const WORXSTREAM_API_CONFIG = {
-  baseURL: process.env.WORXSTREAM_API_URL,
+  baseURL: process.env.WORXSTREAM_API_URL || 'http://localhost:8000',
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',

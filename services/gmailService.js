@@ -254,6 +254,7 @@ async function deleteMessage(accessToken, messageId) {
 async function searchMessages(accessToken, query, folderId = null, maxResults = 20, nextPageToken = null) {
   try {
     console.log(`🔍 Searching Gmail messages with query: "${query}"`);
+    console.log(`🔍 Search parameters: folderId=${folderId}, maxResults=${maxResults}, nextPageToken=${nextPageToken ? 'yes' : 'no'}`);
     
     const gmail = getGmailClient(accessToken);
     
@@ -264,12 +265,19 @@ async function searchMessages(accessToken, query, folderId = null, maxResults = 
       searchQuery = `label:${folderId} ${query}`;
     }
     
+    console.log(`🔍 Final search query: "${searchQuery}"`);
+    console.log(`🔑 Using access token: ${accessToken ? accessToken.substring(0, 20) + '...' : 'null'}`);
+    
     const response = await gmail.users.messages.list({
       userId: 'me',
       q: searchQuery,
       maxResults,
       pageToken: nextPageToken
     });
+
+    console.log(`📊 API Response status: ${response.status}`);
+    console.log(`📊 Messages in response: ${response.data.messages ? response.data.messages.length : 0}`);
+    console.log(`📊 Result size estimate: ${response.data.resultSizeEstimate}`);
 
     if (!response.data.messages || response.data.messages.length === 0) {
       console.log(`✅ No Gmail messages found matching search query`);

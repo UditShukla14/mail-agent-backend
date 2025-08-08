@@ -186,16 +186,24 @@ router.post('/search', authenticateUser, async (req, res) => {
 
     // Get user token for the specified email
     const tokens = await getUserTokens(worxstreamUserId);
+    console.log(`🔑 Found ${tokens.length} tokens for user ${worxstreamUserId}`);
+    console.log(`🔑 Token emails:`, tokens.map(t => ({ email: t.email, provider: t.provider, isExpired: t.isExpired })));
+    
     const token = tokens.find(t => t.email === email);
     
     if (!token) {
+      console.log(`❌ Token not found for email: ${email}`);
       return res.status(404).json({ 
         success: false,
         error: 'Email account not found or not connected' 
       });
     }
 
+    console.log(`✅ Token found for ${email}, provider: ${token.provider}, expired: ${token.isExpired}`);
+    console.log(`🔑 Token access token length: ${token.accessToken ? token.accessToken.length : 0}`);
+
     if (token.isExpired) {
+      console.log(`❌ Token is expired for email: ${email}`);
       return res.status(401).json({ 
         success: false,
         error: 'Email account token has expired. Please reconnect your account.' 
@@ -204,21 +212,36 @@ router.post('/search', authenticateUser, async (req, res) => {
 
     let searchResult;
     
+    console.log(`🔍 Calling search function for provider: ${token.provider}`);
+    
     if (token.provider === 'outlook') {
+      console.log(`📧 Searching Outlook with query: "${query}", folderId: ${folderId}, limit: ${limit}`);
       searchResult = await searchOutlookMessages(
         token.accessToken, 
         query, 
         folderId, 
         limit
       );
+      console.log(`📧 Outlook search result:`, {
+        messageCount: searchResult.messages.length,
+        hasNextLink: !!searchResult.nextLink,
+        totalCount: searchResult.totalCount
+      });
     } else if (token.provider === 'gmail') {
+      console.log(`📨 Searching Gmail with query: "${query}", folderId: ${folderId}, limit: ${limit}`);
       searchResult = await searchGmailMessages(
         token.accessToken, 
         query, 
         folderId, 
         limit
       );
+      console.log(`📨 Gmail search result:`, {
+        messageCount: searchResult.messages.length,
+        hasNextLink: !!searchResult.nextLink,
+        totalCount: searchResult.totalCount
+      });
     } else {
+      console.log(`❌ Unsupported provider: ${token.provider}`);
       return res.status(400).json({ 
         success: false,
         error: 'Unsupported email provider' 
@@ -244,6 +267,139 @@ router.post('/search', authenticateUser, async (req, res) => {
     res.status(500).json({ 
       success: false,
       error: 'Failed to search messages',
+      details: error.message 
+    });
+  }
+});
+
+// Test getting recent emails (no search)
+router.get('/test-emails', authenticateUser, async (req, res) => {
+  try {
+    const worxstreamUserId = req.user.id;
+    const { email } = req.query;
+    
+    if (!email) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Missing email parameter' 
+      });
+    }
+
+    console.log(`🧪 Test getting recent emails for user ${worxstreamUserId}, email: ${email}`);
+
+    // Get user token for the specified email
+    const tokens = await getUserTokens(worxstreamUserId);
+    const token = tokens.find(t => t.email === email);
+    
+    if (!token) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Email account not found or not connected' 
+      });
+    }
+
+    if (token.isExpired) {
+      return res.status(401).json({ 
+        success: false,
+        error: 'Email account token has expired' 
+      });
+    }
+
+    let result;
+    
+    if (token.provider === 'outlook') {
+      const { getMessagesByFolder } = await import('../services/outlookService.js');
+      result = await getMessagesByFolder(token.accessToken, 'inbox', null, 5);
+    } else if (token.provider === 'gmail') {
+      const { getMessagesByFolder } = await import('../services/gmailService.js');
+      result = await getMessagesByFolder(token.accessToken, 'INBOX', null, 5);
+    } else {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Unsupported email provider' 
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        provider: token.provider,
+        email,
+        result
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error in test emails:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Test emails failed',
+      details: error.message 
+    });
+  }
+});
+
+// Test search functionality
+router.get('/test-search', authenticateUser, async (req, res) => {
+  try {
+    const worxstreamUserId = req.user.id;
+    const { email, query = 'test' } = req.query;
+    
+    if (!email) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Missing email parameter' 
+      });
+    }
+
+    console.log(`🧪 Test search for user ${worxstreamUserId}, email: ${email}, query: "${query}"`);
+
+    // Get user token for the specified email
+    const tokens = await getUserTokens(worxstreamUserId);
+    const token = tokens.find(t => t.email === email);
+    
+    if (!token) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Email account not found or not connected' 
+      });
+    }
+
+    if (token.isExpired) {
+      return res.status(401).json({ 
+        success: false,
+        error: 'Email account token has expired' 
+      });
+    }
+
+    let searchResult;
+    
+    if (token.provider === 'outlook') {
+      searchResult = await searchOutlookMessages(token.accessToken, query, null, 5);
+    } else if (token.provider === 'gmail') {
+      searchResult = await searchGmailMessages(token.accessToken, query, null, 5);
+    } else {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Unsupported email provider' 
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        provider: token.provider,
+        query,
+        email,
+        result: searchResult
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error in test search:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Test search failed',
       details: error.message 
     });
   }

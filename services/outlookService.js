@@ -339,6 +339,7 @@ async function getAttachmentsByMessageId(accessToken, messageId) {
 async function searchMessages(accessToken, query, folderId = null, top = 20, nextLink = null) {
   try {
     console.log(`🔍 Searching messages with query: "${query}"`);
+    console.log(`🔍 Search parameters: folderId=${folderId}, top=${top}, nextLink=${nextLink ? 'yes' : 'no'}`);
     
     let url;
     if (nextLink) {
@@ -347,13 +348,47 @@ async function searchMessages(accessToken, query, folderId = null, top = 20, nex
       // Search within a specific folder
       url = `https://graph.microsoft.com/v1.0/me/mailFolders/${folderId}/messages?$search="${encodeURIComponent(query)}"&$top=${top}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bccRecipients,bodyPreview,body,receivedDateTime,isRead,importance,flag,conversationId`;
     } else {
-      // Search across all folders
+      // Search across all folders - try different search syntax
+      // First try with $search parameter
       url = `https://graph.microsoft.com/v1.0/me/messages?$search="${encodeURIComponent(query)}"&$top=${top}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bccRecipients,bodyPreview,body,receivedDateTime,isRead,importance,flag,conversationId`;
+      
+      // If that doesn't work, we can try with $filter parameter instead
+      // url = `https://graph.microsoft.com/v1.0/me/messages?$filter=contains(subject,'${encodeURIComponent(query)}') or contains(body/content,'${encodeURIComponent(query)}')&$top=${top}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bccRecipients,bodyPreview,body,receivedDateTime,isRead,importance,flag,conversationId`;
     }
 
-    const res = await axios.get(url, {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
+    console.log(`🌐 Making request to: ${url}`);
+    console.log(`🔑 Using access token: ${accessToken ? accessToken.substring(0, 20) + '...' : 'null'}`);
+
+    let res;
+    try {
+      res = await axios.get(url, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+    } catch (error) {
+      console.log(`❌ First search attempt failed: ${error.message}`);
+      
+      // Try fallback search with $filter instead of $search
+      if (!folderId && !nextLink) {
+        console.log(`🔄 Trying fallback search with $filter parameter`);
+        const fallbackUrl = `https://graph.microsoft.com/v1.0/me/messages?$filter=contains(subject,'${encodeURIComponent(query)}') or contains(body/content,'${encodeURIComponent(query)}')&$top=${top}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bccRecipients,bodyPreview,body,receivedDateTime,isRead,importance,flag,conversationId`;
+        
+        try {
+          res = await axios.get(fallbackUrl, {
+            headers: { Authorization: `Bearer ${accessToken}` }
+          });
+          console.log(`✅ Fallback search successful`);
+        } catch (fallbackError) {
+          console.log(`❌ Fallback search also failed: ${fallbackError.message}`);
+          throw fallbackError;
+        }
+      } else {
+        throw error;
+      }
+    }
+
+    console.log(`📊 API Response status: ${res.status}`);
+    console.log(`📊 API Response data keys: ${Object.keys(res.data)}`);
+    console.log(`📊 Messages in response: ${res.data.value ? res.data.value.length : 0}`);
 
     const messages = res.data.value.map(msg => {
       const mappedMsg = {
