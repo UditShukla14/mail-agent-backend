@@ -9,6 +9,44 @@ import { getUserTokens, deleteToken } from '../utils/tokenManager.js';
 
 const router = express.Router();
 
+// Get token for a specific email account
+router.get('/token/:email', authenticateUser, async (req, res) => {
+  try {
+    const worxstreamUserId = req.user.id;
+    const email = req.params.email;
+    const provider = req.query.provider || 'outlook'; // Default to outlook
+    
+    console.log(`🔍 Getting token for email: ${email}, user: ${worxstreamUserId}, provider: ${provider}`);
+    
+    // Get token from database
+    const token = await getToken(worxstreamUserId, email, provider);
+    
+    if (!token) {
+      return res.status(404).json({
+        success: false,
+        error: `No valid token found for email ${email}`,
+        code: 'TOKEN_NOT_FOUND'
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        email,
+        provider,
+        hasToken: true
+      }
+    });
+  } catch (error) {
+    console.error('Error getting token:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get token',
+      details: error.message
+    });
+  }
+});
+
 // Get all connected accounts for the authenticated user
 router.get('/accounts', authenticateUser, async (req, res) => {
   try {

@@ -14,15 +14,33 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 // 🔁 Get valid access_token or refresh if expired
 export const getToken = async (worxstreamUserId, email, provider) => {
   try {
-    const cacheKey = `${worxstreamUserId}:${email}:${provider}`;
+    // Ensure worxstreamUserId is a number
+    const numericUserId = Number(worxstreamUserId);
+    console.log('🔍 Debug: getToken called with:', { 
+      originalWorxstreamUserId: worxstreamUserId, 
+      numericUserId: numericUserId,
+      email, 
+      provider 
+    });
+    
+    const cacheKey = `${numericUserId}:${email}:${provider}`;
     const cached = tokenCache.get(cacheKey);
     
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      console.log('🔍 Debug: Returning cached token for:', cacheKey);
       return cached.token;
     }
 
-    const tokenDoc = await Token.findOne({ worxstreamUserId, email, provider });
+    const tokenDoc = await Token.findOne({ worxstreamUserId: numericUserId, email, provider });
+    console.log('🔍 Debug: Token lookup result:', { 
+      found: !!tokenDoc, 
+      tokenId: tokenDoc?._id,
+      hasAccessToken: !!tokenDoc?.access_token,
+      hasRefreshToken: !!tokenDoc?.refresh_token
+    });
+    
     if (!tokenDoc) {
+      console.log('🔍 Debug: No token document found');
       return null;
     }
 
@@ -207,7 +225,9 @@ export const deleteToken = async (worxstreamUserId, email, provider) => {
 // 📋 Get all tokens for a user
 export const getUserTokens = async (worxstreamUserId) => {
   try {
-    const tokens = await Token.find({ worxstreamUserId });
+    // Ensure worxstreamUserId is a number
+    const numericUserId = Number(worxstreamUserId);
+    const tokens = await Token.find({ worxstreamUserId: numericUserId });
     
     return tokens.map(token => ({
       email: token.email,

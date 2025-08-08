@@ -177,8 +177,18 @@ export const initMailSocket = (socket, io) => {
       socket.worxstreamUserId = worxstreamUserId;
     
     // Use the authenticated user's ID instead of the passed worxstreamUserId
-    const userId = socket.user?.id || worxstreamUserId;
+    // Ensure we use the correct type (Number) for worxstreamUserId
+    const userId = Number(socket.user?.id || worxstreamUserId);
     
+    console.log('🔍 Debug: mail:init called with:', {
+      passedWorxstreamUserId: worxstreamUserId,
+      socketUserId: socket.user?.id,
+      finalUserId: userId,
+      email: email,
+      socketUser: socket.user
+    });
+    
+    // Check if the email has a valid token for this user
     const token = await getToken(userId, email, 'outlook');
     if (!token) {
       // Check if user has any connected accounts
@@ -187,7 +197,7 @@ export const initMailSocket = (socket, io) => {
         socket.emit('mail:error', 'No email accounts connected. Please connect your email account first.');
         return;
       } else {
-        socket.emit('mail:error', `Email account ${email} not connected. Please connect this account or use a connected account.`);
+        socket.emit('mail:error', `Email account ${email} is not connected or has expired. Available accounts: ${userTokens.map(t => t.email).join(', ')}`);
         return;
       }
     }
@@ -203,11 +213,18 @@ export const initMailSocket = (socket, io) => {
     debounce(debounceKey, async () => {
       try {
         // Use the authenticated user's ID instead of the passed worxstreamUserId
-        const userId = socket.user?.id || worxstreamUserId;
+        // Ensure we use the correct type (Number) for worxstreamUserId
+        const userId = Number(socket.user?.id || worxstreamUserId);
         
         const token = await getToken(userId, email, 'outlook');
         if (!token) {
-          return socket.emit('mail:error', 'Token not found');
+          // Check if user has any connected accounts
+          const userTokens = await getUserTokens(userId);
+          if (userTokens.length === 0) {
+            return socket.emit('mail:error', 'No email accounts connected. Please connect your email account first.');
+          } else {
+            return socket.emit('mail:error', `Email account ${email} is not connected or has expired. Available accounts: ${userTokens.map(t => t.email).join(', ')}`);
+          }
         }
 
         const key = `${socket.id}-${folderId}`;
