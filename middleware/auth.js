@@ -137,47 +137,8 @@ export const optionalAuth = async (req, res, next) => {
   }
 };
 
-// Validate user has access to mail-agent features
-export const validateMailAccess = async (req, res, next) => {
-  try {
-    if (!req.user || !req.token) {
-      return res.status(401).json({
-        success: false,
-        error: 'Authentication required',
-        code: 'AUTH_REQUIRED'
-      });
-    }
-
-    // In development mode, always allow access
-    if (process.env.NODE_ENV === 'development') {
-      return next();
-    }
-
-    // Check if user has access to mail-agent features
-    const accessResult = await worxstreamApi.validateUserAccess(req.token);
-    
-    if (!accessResult.success) {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied. Please check your subscription.',
-        code: 'ACCESS_DENIED'
-      });
-    }
-
-    // You can add additional checks here based on subscription type
-    // For example, check if the subscription includes mail-agent features
-    
-    next();
-  } catch (error) {
-    // In development mode, allow access on error
-    if (process.env.NODE_ENV === 'development') {
-      return next();
-    }
-    
-    return res.status(500).json({
-      success: false,
-      error: 'Access validation service error',
-      code: 'ACCESS_SERVICE_ERROR'
-    });
-  }
-}; 
+// TODO: Re-implement validateMailAccess when subscription system is ready
+// export const validateMailAccess = async (req, res, next) => {
+//   // Subscription validation logic will go here
+//   return next();
+// }; 

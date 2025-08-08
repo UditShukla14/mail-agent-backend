@@ -4,13 +4,13 @@ import Token from '../models/Token.js';
 import Email from '../models/email.js';
 import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
-import { authenticateUser, validateMailAccess } from '../middleware/auth.js';
+import { authenticateUser } from '../middleware/auth.js';
 import { getUserTokens, deleteToken } from '../utils/tokenManager.js';
 
 const router = express.Router();
 
 // Get all connected accounts for the authenticated user
-router.get('/accounts', authenticateUser, validateMailAccess, async (req, res) => {
+router.get('/accounts', authenticateUser, async (req, res) => {
   try {
     const worxstreamUserId = req.user.id;
     const worxstreamUser = req.user;
@@ -102,7 +102,7 @@ router.get('/accounts', authenticateUser, validateMailAccess, async (req, res) =
 });
 
 // Unlink an email account
-router.delete('/unlink', authenticateUser, validateMailAccess, async (req, res) => {
+router.delete('/unlink', authenticateUser, async (req, res) => {
   try {
     const worxstreamUserId = req.user.id;
     const { email } = req.body;

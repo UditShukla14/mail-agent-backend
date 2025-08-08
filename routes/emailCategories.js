@@ -6,12 +6,12 @@ import {
   deleteEmailCategory,
   getUserEmailAccounts
 } from '../controllers/emailCategoriesController.js';
-import { authenticateUser, validateMailAccess } from '../middleware/auth.js';
+import { authenticateUser } from '../middleware/auth.js';
 
 const router = express.Router();
 
 // Apply authentication middleware to all routes
-router.use(authenticateUser, validateMailAccess);
+router.use(authenticateUser);
 
 // Get categories for a specific email account
 router.get('/', getEmailCategories);
