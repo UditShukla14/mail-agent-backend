@@ -335,63 +335,51 @@ async function getAttachmentsByMessageId(accessToken, messageId) {
   }
 }
 
-// search messages using Microsoft Graph search API
-async function searchMessages(accessToken, query, folderId = null, top = 20, nextLink = null) {
+async function searchMessages(accessToken, query, top = 20, nextLink = null) {
   try {
-    console.log(`🔍 Searching messages with query: "${query}"`);
-    console.log(`🔍 Search parameters: folderId=${folderId}, top=${top}, nextLink=${nextLink ? 'yes' : 'no'}`);
-    
-    let url;
+    let url = 'https://graph.microsoft.com/v1.0/me/search/query';
+    let body;
+
     if (nextLink) {
+      // For pagination, the Search API returns a `@odata.nextLink` token
       url = nextLink;
-    } else if (folderId) {
-      // Search within a specific folder
-      url = `https://graph.microsoft.com/v1.0/me/mailFolders/${folderId}/messages?$search="${encodeURIComponent(query)}"&$top=${top}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bccRecipients,bodyPreview,body,receivedDateTime,isRead,importance,flag,conversationId`;
+      body = null;
     } else {
-      // Search across all folders - try different search syntax
-      // First try with $search parameter
-      url = `https://graph.microsoft.com/v1.0/me/messages?$search="${encodeURIComponent(query)}"&$top=${top}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bccRecipients,bodyPreview,body,receivedDateTime,isRead,importance,flag,conversationId`;
-      
-      // If that doesn't work, we can try with $filter parameter instead
-      // url = `https://graph.microsoft.com/v1.0/me/messages?$filter=contains(subject,'${encodeURIComponent(query)}') or contains(body/content,'${encodeURIComponent(query)}')&$top=${top}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bccRecipients,bodyPreview,body,receivedDateTime,isRead,importance,flag,conversationId`;
+      body = {
+        requests: [
+          {
+            entityTypes: ["message"], // Search only emails
+            query: {
+              queryString: query // No quotes needed, supports AND/OR
+            },
+            from: 0, // offset
+            size: top, // number of results
+            sortProperties: [
+              {
+                name: "receivedDateTime",
+                isDescending: true
+              }
+            ],
+            fields: [
+              "id", "subject", "from", "toRecipients", "ccRecipients", "bccRecipients",
+              "bodyPreview", "receivedDateTime", "isRead", "importance", "flag", "conversationId"
+            ]
+          }
+        ]
+      };
     }
 
-    console.log(`🌐 Making request to: ${url}`);
-    console.log(`🔑 Using access token: ${accessToken ? accessToken.substring(0, 20) + '...' : 'null'}`);
-
-    let res;
-    try {
-      res = await axios.get(url, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-    } catch (error) {
-      console.log(`❌ First search attempt failed: ${error.message}`);
-      
-      // Try fallback search with $filter instead of $search
-      if (!folderId && !nextLink) {
-        console.log(`🔄 Trying fallback search with $filter parameter`);
-        const fallbackUrl = `https://graph.microsoft.com/v1.0/me/messages?$filter=contains(subject,'${encodeURIComponent(query)}') or contains(body/content,'${encodeURIComponent(query)}')&$top=${top}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bccRecipients,bodyPreview,body,receivedDateTime,isRead,importance,flag,conversationId`;
-        
-        try {
-          res = await axios.get(fallbackUrl, {
-            headers: { Authorization: `Bearer ${accessToken}` }
-          });
-          console.log(`✅ Fallback search successful`);
-        } catch (fallbackError) {
-          console.log(`❌ Fallback search also failed: ${fallbackError.message}`);
-          throw fallbackError;
-        }
-      } else {
-        throw error;
+    const res = await axios.post(url, body, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
       }
-    }
+    });
 
-    console.log(`📊 API Response status: ${res.status}`);
-    console.log(`📊 API Response data keys: ${Object.keys(res.data)}`);
-    console.log(`📊 Messages in response: ${res.data.value ? res.data.value.length : 0}`);
-
-    const messages = res.data.value.map(msg => {
-      const mappedMsg = {
+    const rawResults = res.data.value?.[0]?.hitsContainers?.[0]?.hits || [];
+    const messages = rawResults.map(hit => {
+      const msg = hit.resource;
+      return {
         id: msg.id,
         from: `${msg.from?.emailAddress?.name || ''} <${msg.from?.emailAddress?.address || ''}>`,
         to: msg.toRecipients?.map(r => `${r.emailAddress?.name || ''} <${r.emailAddress?.address || ''}>`).join(', ') || '',
@@ -399,39 +387,26 @@ async function searchMessages(accessToken, query, folderId = null, top = 20, nex
         bcc: msg.bccRecipients?.map(r => `${r.emailAddress?.name || ''} <${r.emailAddress?.address || ''}>`).join(', ') || '',
         subject: msg.subject || '(No Subject)',
         preview: msg.bodyPreview || '',
-        content: msg.body?.content || '',
         timestamp: msg.receivedDateTime,
         read: msg.isRead || false,
-        folder: folderId || null,
         important: msg.importance === "high",
         flagged: msg.flag?.flagStatus === "flagged",
         conversationId: msg.conversationId
       };
+    });
 
-      // Ensure all required fields are present
-      if (!mappedMsg.id || !mappedMsg.from || !mappedMsg.timestamp) {
-        console.error('❌ Message missing required fields:', mappedMsg);
-        return null;
-      }
-
-      return mappedMsg;
-    }).filter(Boolean); // Remove any null messages
-
-    console.log(`✅ Found ${messages.length} messages matching search query`);
-    
     return {
       messages,
       nextLink: res.data['@odata.nextLink'] || null,
-      totalCount: res.data['@odata.count'] || messages.length
+      totalCount: messages.length
     };
+
   } catch (err) {
-    console.error('❌ Failed to search messages:', err?.response?.data || err.message);
-    if (err.response?.data) {
-      console.error('❌ Full error response:', err.response.data);
-    }
+    console.error('❌ Advanced search failed:', err?.response?.data || err.message);
     return { messages: [], nextLink: null, totalCount: 0 };
   }
 }
+
 
 export const deleteMessage = async (token, messageId) => {
   try {
