@@ -223,10 +223,8 @@ io.use(async (socket, next) => {
 io.on('connection', (socket) => {
   console.log('🔌 New client connected:', socket.id, 'User:', socket.user?.email);
   
-  // Log every event received
-  socket.onAny((event, ...args) => {
-    console.log(`📨 Received event: ${event}`, args.length ? args[0] : '');
-  });
+  // Log connection event
+  console.log(`📨 Socket connected: ${socket.id} for user: ${socket.user?.email}`);
 
   initMailSocket(socket, io);
 
