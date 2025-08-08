@@ -335,97 +335,6 @@ async function getAttachmentsByMessageId(accessToken, messageId) {
   }
 }
 
-async function searchMessages(accessToken, query, top = 20, nextLink = null) {
-  try {
-    console.log(`📧 Searching Outlook with query: "${query}", limit: ${top}, nextLink: ${!!nextLink}`);
-    console.log(`🔑 Access token length: ${accessToken ? accessToken.length : 0}`);
-
-    if (!accessToken || accessToken.length < 10) {
-      console.error('❌ Missing or invalid access token for search');
-      return { messages: [], nextLink: null, totalCount: 0 };
-    }
-
-    let res;
-    if (nextLink) {
-      console.log(`➡️ Fetching next page from nextLink`);
-      res = await axios.get(nextLink, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-    } else {
-      const url = 'https://graph.microsoft.com/v1.0/me/search/query';
-      const body = {
-        requests: [
-          {
-            entityTypes: ["message"],
-            query: { queryString: query },
-            from: 0,
-            size: top,
-            sortProperties: [{ name: "receivedDateTime", isDescending: true }],
-            fields: [
-              "id", "subject", "from", "toRecipients", "ccRecipients", "bccRecipients",
-              "bodyPreview", "receivedDateTime", "isRead", "importance", "flag", "conversationId"
-            ]
-          }
-        ]
-      };
-
-      console.log(`🌐 Calling Microsoft Graph Search API: ${url}`);
-      res = await axios.post(url, body, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        }
-      });
-    }
-
-    const rawResults = res.data.value?.[0]?.hitsContainers?.[0]?.hits || [];
-    console.log(`📊 Search API returned ${rawResults.length} hits`);
-
-    const messages = rawResults.map(hit => {
-      const msg = hit.resource;
-      const mappedMsg = {
-        id: msg.id,
-        from: `${msg.from?.emailAddress?.name || ''} <${msg.from?.emailAddress?.address || ''}>`,
-        to: msg.toRecipients?.map(r => `${r.emailAddress?.name || ''} <${r.emailAddress?.address || ''}>`).join(', ') || '',
-        cc: msg.ccRecipients?.map(r => `${r.emailAddress?.name || ''} <${r.emailAddress?.address || ''}>`).join(', ') || '',
-        bcc: msg.bccRecipients?.map(r => `${r.emailAddress?.name || ''} <${r.emailAddress?.address || ''}>`).join(', ') || '',
-        subject: msg.subject || '(No Subject)',
-        preview: msg.bodyPreview || '',
-        timestamp: msg.receivedDateTime,
-        read: msg.isRead || false,
-        folder: null,
-        important: msg.importance === "high",
-        flagged: msg.flag?.flagStatus === "flagged",
-        conversationId: msg.conversationId
-      };
-
-      if (!mappedMsg.id || !mappedMsg.from || !mappedMsg.timestamp) {
-        console.error('❌ Search result missing required fields:', mappedMsg);
-        return null;
-      }
-      return mappedMsg;
-    }).filter(Boolean);
-
-    console.log(`✅ Search completed. Found ${messages.length} messages`);
-
-    return {
-      messages,
-      nextLink: res.data['@odata.nextLink'] || null,
-      totalCount: messages.length
-    };
-
-  } catch (err) {
-    console.error('❌ Advanced search failed:', err?.response?.data || err.message);
-    if (err.response?.data) {
-      console.error('❌ Full error response:', JSON.stringify(err.response.data, null, 2));
-    }
-    return { messages: [], nextLink: null, totalCount: 0 };
-  }
-}
-
-
-
-
 export const deleteMessage = async (token, messageId) => {
   try {
     const response = await axios.delete(
@@ -444,4 +353,4 @@ export const deleteMessage = async (token, messageId) => {
   }
 };
 
-export { sendEmail, replyToEmail, replyAllToEmail, getMailFolders, getMessageById, getMessagesByFolder, markMessageRead, markMessageImportant, getAttachmentsByMessageId, searchMessages };
+export { sendEmail, replyToEmail, replyAllToEmail, getMailFolders, getMessageById, getMessagesByFolder, markMessageRead, markMessageImportant, getAttachmentsByMessageId };

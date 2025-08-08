@@ -60,7 +60,6 @@ app.use(cors(corsOptions));
 // Add a middleware to ensure CORS headers are set
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -142,10 +141,6 @@ app.use('/account', accountRoutes);
 app.use('/email-analytics', emailAnalyticsRoutes);
 app.use('/email-categories', emailCategoriesRoutes);
 app.use('/ai-reply', aiReplyRoutes);
-
-// Add specific CORS handling for search routes
-app.options('/account/search', cors(corsOptions));
-app.options('/account/folders', cors(corsOptions));
 
 // Health check endpoint
 app.get('/', (req, res) => {
