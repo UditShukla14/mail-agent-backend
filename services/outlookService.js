@@ -337,11 +337,19 @@ async function getAttachmentsByMessageId(accessToken, messageId) {
 
 async function searchMessages(accessToken, query, top = 20, nextLink = null) {
   try {
+    console.log(`📧 Searching Outlook with query: "${query}", limit: ${top}, nextLink: ${!!nextLink}`);
+    console.log(`🔑 Access token length: ${accessToken ? accessToken.length : 0}`);
+
+    if (!accessToken || accessToken.length < 10) {
+      console.error('❌ Missing or invalid access token for search');
+      return { messages: [], nextLink: null, totalCount: 0 };
+    }
+
     let url = 'https://graph.microsoft.com/v1.0/me/search/query';
     let body;
 
     if (nextLink) {
-      // For pagination, the Search API returns a `@odata.nextLink` token
+      // Pagination request
       url = nextLink;
       body = null;
     } else {
@@ -349,16 +357,11 @@ async function searchMessages(accessToken, query, top = 20, nextLink = null) {
         requests: [
           {
             entityTypes: ["message"], // Search only emails
-            query: {
-              queryString: query // No quotes needed, supports AND/OR
-            },
-            from: 0, // offset
-            size: top, // number of results
+            query: { queryString: query }, // No quotes needed
+            from: 0,
+            size: top,
             sortProperties: [
-              {
-                name: "receivedDateTime",
-                isDescending: true
-              }
+              { name: "receivedDateTime", isDescending: true }
             ],
             fields: [
               "id", "subject", "from", "toRecipients", "ccRecipients", "bccRecipients",
@@ -369,6 +372,8 @@ async function searchMessages(accessToken, query, top = 20, nextLink = null) {
       };
     }
 
+    console.log(`🌐 Calling Microsoft Graph Search API: ${url}`);
+
     const res = await axios.post(url, body, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -377,9 +382,11 @@ async function searchMessages(accessToken, query, top = 20, nextLink = null) {
     });
 
     const rawResults = res.data.value?.[0]?.hitsContainers?.[0]?.hits || [];
+    console.log(`📊 Search API returned ${rawResults.length} hits`);
+
     const messages = rawResults.map(hit => {
       const msg = hit.resource;
-      return {
+      const mappedMsg = {
         id: msg.id,
         from: `${msg.from?.emailAddress?.name || ''} <${msg.from?.emailAddress?.address || ''}>`,
         to: msg.toRecipients?.map(r => `${r.emailAddress?.name || ''} <${r.emailAddress?.address || ''}>`).join(', ') || '',
@@ -389,11 +396,21 @@ async function searchMessages(accessToken, query, top = 20, nextLink = null) {
         preview: msg.bodyPreview || '',
         timestamp: msg.receivedDateTime,
         read: msg.isRead || false,
+        folder: null, // Cross-folder search
         important: msg.importance === "high",
         flagged: msg.flag?.flagStatus === "flagged",
         conversationId: msg.conversationId
       };
-    });
+
+      if (!mappedMsg.id || !mappedMsg.from || !mappedMsg.timestamp) {
+        console.error('❌ Search result missing required fields:', mappedMsg);
+        return null;
+      }
+
+      return mappedMsg;
+    }).filter(Boolean);
+
+    console.log(`✅ Search completed. Found ${messages.length} messages matching query "${query}"`);
 
     return {
       messages,
@@ -403,9 +420,13 @@ async function searchMessages(accessToken, query, top = 20, nextLink = null) {
 
   } catch (err) {
     console.error('❌ Advanced search failed:', err?.response?.data || err.message);
+    if (err.response?.data) {
+      console.error('❌ Full error response:', JSON.stringify(err.response.data, null, 2));
+    }
     return { messages: [], nextLink: null, totalCount: 0 };
   }
 }
+
 
 
 export const deleteMessage = async (token, messageId) => {
