@@ -9,14 +9,14 @@ class MailHandler {
   async handleGetFolder(socket, data) {
     try {
       console.log('Handling getFolder request:', data);
-      const { appUserId, email, folderId, page = 1 } = data;
+      const { worxstreamUserId, email, folderId, page = 1 } = data;
       const pageSize = 20; // Number of emails per page
-      const messages = await emailService.getFolderMessages(appUserId, email, folderId, page, pageSize);
+              const messages = await emailService.getFolderMessages(worxstreamUserId, email, folderId, page, pageSize);
       
       console.log(`Retrieved ${messages.length} messages from folder ${folderId}`);
       
       // Check if there are more messages to load
-      const totalCount = await emailService.getFolderMessageCount(appUserId, email, folderId);
+              const totalCount = await emailService.getFolderMessageCount(worxstreamUserId, email, folderId);
       const hasMore = totalCount > page * pageSize;
       
       // Emit messages immediately
@@ -39,8 +39,8 @@ class MailHandler {
   async handleGetMessage(socket, data) {
     try {
       console.log('Handling getMessage request:', data);
-      const { appUserId, email, messageId } = data;
-      const message = await emailService.getMessage(appUserId, email, messageId);
+      const { worxstreamUserId, email, messageId } = data;
+      const message = await emailService.getMessage(worxstreamUserId, email, messageId);
       
       console.log(`Retrieved message ${messageId}`);
       
@@ -59,8 +59,8 @@ class MailHandler {
   async handleMarkRead(socket, data) {
     try {
       console.log('Handling markRead request:', data);
-      const { appUserId, email, messageId } = data;
-      await emailService.markAsRead(appUserId, email, messageId);
+      const { worxstreamUserId, email, messageId } = data;
+      await emailService.markAsRead(worxstreamUserId, email, messageId);
       socket.emit('mail:read', { messageId });
       console.log(`Marked message ${messageId} as read`);
     } catch (error) {
@@ -72,8 +72,8 @@ class MailHandler {
   async handleMarkImportant(socket, data) {
     try {
       console.log('Handling markImportant request:', data);
-      const { appUserId, email, messageId, flag } = data;
-      await emailService.markAsImportant(appUserId, email, messageId, flag);
+      const { worxstreamUserId, email, messageId, flag } = data;
+      await emailService.markAsImportant(worxstreamUserId, email, messageId, flag);
       socket.emit('mail:important', { messageId, flag });
       console.log(`Marked message ${messageId} important flag as ${flag}`);
     } catch (error) {

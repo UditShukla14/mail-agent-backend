@@ -1,6 +1,5 @@
 // models/User.js
 import mongoose from 'mongoose';
-import { v4 as uuidv4 } from 'uuid';
 
 const userSchema = new mongoose.Schema({
   email: {
@@ -10,17 +9,21 @@ const userSchema = new mongoose.Schema({
     lowercase: true,
     trim: true
   },
-  passwordHash: {
+  worxstreamUserId: {
+    type: Number,
+    required: true,
+    unique: true
+  },
+  name: {
     type: String,
     required: true
-  },
-  appUserId: {
-    type: String,
-    unique: true,
-    default: uuidv4
   }
 }, {
   timestamps: true
 });
+
+// Index for efficient queries
+userSchema.index({ worxstreamUserId: 1 });
+userSchema.index({ email: 1 });
 
 export default mongoose.model('User', userSchema);

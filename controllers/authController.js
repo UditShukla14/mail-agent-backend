@@ -3,6 +3,7 @@ import axios from 'axios';
 import dotenv from 'dotenv';
 import { saveToken, getToken } from '../utils/tokenManager.js';
 import { google } from 'googleapis';
+import { authenticateUser } from '../middleware/auth.js';
 
 dotenv.config();
 
@@ -16,31 +17,53 @@ const {
 } = process.env;
 
 // 1️⃣ Redirect to Microsoft Login
-export const outlookLogin = (req, res) => {
-  const { appUserId, callbackUrl } = req.query;
-  if (!appUserId) return res.status(400).send('Missing appUserId');
+export const outlookLogin = async (req, res) => {
+  try {
+    // Verify user is authenticated with worXstream
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required',
+        code: 'AUTH_REQUIRED'
+      });
+    }
 
-  const scopes = [
-    'openid',
-    'profile',
-    'email',
-    'offline_access',
-    'User.Read',
-    'Mail.ReadWrite',
-    'Mail.Send'
-  ].join(' ');
+    const worxstreamUserId = req.user.id;
+    const { callbackUrl } = req.query;
 
-  const statePayload = Buffer.from(JSON.stringify({ appUserId, callbackUrl })).toString('base64');
-  const authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize` +
-    `?client_id=${CLIENT_ID}` +
-    `&response_type=code` +
-    `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-    `&response_mode=query` +
-    `&scope=${encodeURIComponent(scopes)}` +
-    `&prompt=select_account` +
-    `&state=${statePayload}`;
+    const scopes = [
+      'openid',
+      'profile',
+      'email',
+      'offline_access',
+      'User.Read',
+      'Mail.ReadWrite',
+      'Mail.Send'
+    ].join(' ');
 
-  res.redirect(authUrl);
+    const statePayload = Buffer.from(JSON.stringify({ worxstreamUserId, callbackUrl })).toString('base64');
+    const authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize` +
+      `?client_id=${CLIENT_ID}` +
+      `&response_type=code` +
+      `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+      `&response_mode=query` +
+      `&scope=${encodeURIComponent(scopes)}` +
+      `&prompt=select_account` +
+      `&state=${statePayload}`;
+
+    res.json({
+      success: true,
+      authUrl,
+      worxstreamUserId
+    });
+  } catch (error) {
+    console.error('Outlook login error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to initiate Outlook login',
+      code: 'LOGIN_INIT_ERROR'
+    });
+  }
 };
 
 // 2️⃣ Handle Redirect and Token Exchange
@@ -56,10 +79,10 @@ export const outlookRedirect = async (req, res) => {
     return res.status(400).send('Invalid state parameter');
   }
 
-  const { appUserId, callbackUrl } = state;
+  const { worxstreamUserId, callbackUrl } = state;
 
-  if (!code || !appUserId) {
-    return res.status(400).send('Missing code or appUserId');
+  if (!code || !worxstreamUserId) {
+    return res.status(400).send('Missing code or worxstreamUserId');
   }
 
   try {
@@ -89,14 +112,14 @@ export const outlookRedirect = async (req, res) => {
     console.log(`✅ User profile fetched: ${email}`);
 
     console.log('🔄 Saving tokens...');
-    const saved = await saveToken(appUserId, email, { access_token, refresh_token, expires_in }, 'outlook');
+    const saved = await saveToken(worxstreamUserId, email, { access_token, refresh_token, expires_in }, 'outlook');
     if (!saved) {
       throw new Error('Failed to save token');
     }
     console.log('✅ Tokens saved successfully');
 
     console.log('🔄 Verifying token...');
-    const token = await getToken(appUserId, email, 'outlook');
+    const token = await getToken(worxstreamUserId, email, 'outlook');
     if (!token) {
       throw new Error('Token verification failed');
     }
@@ -105,7 +128,7 @@ export const outlookRedirect = async (req, res) => {
     if (callbackUrl) {
       const redirectUrl = new URL(callbackUrl);
       redirectUrl.searchParams.set('provider', 'outlook');
-      redirectUrl.searchParams.set('appUserId', appUserId);
+      redirectUrl.searchParams.set('worxstreamUserId', worxstreamUserId);
       redirectUrl.searchParams.set('email', email);
       redirectUrl.searchParams.set('success', 'true');
       return res.redirect(redirectUrl.toString());
@@ -160,33 +183,55 @@ export const outlookRedirect = async (req, res) => {
 };
 
 // Gmail OAuth Functions
-export const gmailLogin = (req, res) => {
-  const { appUserId, callbackUrl } = req.query;
-  if (!appUserId) return res.status(400).send('Missing appUserId');
+export const gmailLogin = async (req, res) => {
+  try {
+    // Verify user is authenticated with worXstream
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required',
+        code: 'AUTH_REQUIRED'
+      });
+    }
 
-  const oauth2Client = new google.auth.OAuth2(
-    GMAIL_CLIENT_ID,
-    GMAIL_CLIENT_SECRET,
-    GMAIL_REDIRECT_URI
-  );
+    const worxstreamUserId = req.user.id;
+    const { callbackUrl } = req.query;
 
-  const scopes = [
-    'https://www.googleapis.com/auth/gmail.readonly',
-    'https://www.googleapis.com/auth/gmail.send',
-    'https://www.googleapis.com/auth/gmail.modify',
-    'https://www.googleapis.com/auth/userinfo.email',
-    'https://www.googleapis.com/auth/userinfo.profile'
-  ];
+    const oauth2Client = new google.auth.OAuth2(
+      GMAIL_CLIENT_ID,
+      GMAIL_CLIENT_SECRET,
+      GMAIL_REDIRECT_URI
+    );
 
-  const statePayload = Buffer.from(JSON.stringify({ appUserId, callbackUrl })).toString('base64');
-  const authUrl = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: scopes,
-    state: statePayload,
-    prompt: 'consent'
-  });
+    const scopes = [
+      'https://www.googleapis.com/auth/gmail.readonly',
+      'https://www.googleapis.com/auth/gmail.send',
+      'https://www.googleapis.com/auth/gmail.modify',
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/userinfo.profile'
+    ];
 
-  res.redirect(authUrl);
+    const statePayload = Buffer.from(JSON.stringify({ worxstreamUserId, callbackUrl })).toString('base64');
+    const authUrl = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: scopes,
+      state: statePayload,
+      prompt: 'consent'
+    });
+
+    res.json({
+      success: true,
+      authUrl,
+      worxstreamUserId
+    });
+  } catch (error) {
+    console.error('Gmail login error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to initiate Gmail login',
+      code: 'LOGIN_INIT_ERROR'
+    });
+  }
 };
 
 export const gmailRedirect = async (req, res) => {
@@ -199,10 +244,10 @@ export const gmailRedirect = async (req, res) => {
     return res.status(400).send('Invalid state parameter');
   }
 
-  const { appUserId, callbackUrl } = state;
+  const { worxstreamUserId, callbackUrl } = state;
 
-  if (!code || !appUserId) {
-    return res.status(400).send('Missing code or appUserId');
+  if (!code || !worxstreamUserId) {
+    return res.status(400).send('Missing code or worxstreamUserId');
   }
 
   try {
@@ -228,7 +273,7 @@ export const gmailRedirect = async (req, res) => {
     console.log(`✅ User profile fetched: ${email}`);
 
     console.log('🔄 Saving tokens...');
-    const saved = await saveToken(appUserId, email, {
+    const saved = await saveToken(worxstreamUserId, email, {
       access_token,
       refresh_token,
       expires_in: Math.floor((expiry_date - Date.now()) / 1000)
@@ -240,7 +285,7 @@ export const gmailRedirect = async (req, res) => {
     console.log('✅ Tokens saved successfully');
 
     console.log('🔄 Verifying token...');
-    const token = await getToken(appUserId, email, 'gmail');
+    const token = await getToken(worxstreamUserId, email, 'gmail');
     if (!token) {
       throw new Error('Token verification failed');
     }
@@ -249,7 +294,7 @@ export const gmailRedirect = async (req, res) => {
     if (callbackUrl) {
       const redirectUrl = new URL(callbackUrl);
       redirectUrl.searchParams.set('provider', 'gmail');
-      redirectUrl.searchParams.set('appUserId', appUserId);
+      redirectUrl.searchParams.set('worxstreamUserId', worxstreamUserId);
       redirectUrl.searchParams.set('email', email);
       redirectUrl.searchParams.set('success', 'true');
       return res.redirect(redirectUrl.toString());
@@ -305,9 +350,9 @@ export const gmailRedirect = async (req, res) => {
 
 // 3️⃣ Handle Frontend Callback
 export const handleCallback = async (req, res) => {
-  const { appUserId, provider, email } = req.body;
+  const { worxstreamUserId, provider, email } = req.body;
 
-  if (!appUserId || !provider || !email) {
+  if (!worxstreamUserId || !provider || !email) {
     return res.status(400).json({ 
       error: 'Missing required parameters' 
     });
@@ -315,7 +360,7 @@ export const handleCallback = async (req, res) => {
 
   try {
     console.log(`🔄 Verifying account: ${email} (${provider})`);
-    const token = await getToken(appUserId, email, provider);
+    const token = await getToken(worxstreamUserId, email, provider);
     if (!token) {
       throw new Error('Account not found');
     }

@@ -11,36 +11,89 @@ import {
   deleteMessage
 } from '../services/outlookService.js';
 
-import { getToken } from '../utils/tokenManager.js';
+import { getToken, getUserTokens } from '../utils/tokenManager.js';
 import User from '../models/User.js';
 import Email from '../models/email.js';
 import emailEnrichmentService from '../services/emailEnrichment.js';
 import enrichmentQueueService from '../services/enrichmentQueueService.js';
 import axios from 'axios';
 import emailService from '../services/emailService.js';
-import { Server } from 'socket.io';
 
 export const initMailSocket = (socket, io) => {
-  console.log(`📬 Mail socket connected: ${socket.id}`);
 
   const folderPaginationMap = new Map();
+  
+  // Debounce mechanism to prevent rapid-fire requests
+  const debounceMap = new Map();
+  const DEBOUNCE_DELAY = 1000; // 1 second
+  
+  const debounce = (key, callback) => {
+    if (debounceMap.has(key)) {
+      clearTimeout(debounceMap.get(key));
+    }
+    debounceMap.set(key, setTimeout(() => {
+      debounceMap.delete(key);
+      callback();
+    }, DEBOUNCE_DELAY));
+  };
 
-  // Handle real-time enrichment updates
-  socket.on('mail:enrichmentUpdate', (data) => {
-    // Broadcast the update to all connected clients
-    io.emit('mail:enrichmentUpdate', data);
+  // Unified socket initialization - called when user logs into worXstream
+  socket.on('unified:init', async ({ worxstreamUserId, userInfo }) => {
+    try {
+      // Store worxstreamUserId on socket for unified access
+      socket.worxstreamUserId = worxstreamUserId;
+      
+      // Store user info for future reference
+      socket.userInfo = userInfo;
+      
+      // Register this socket with the email enrichment service
+      emailEnrichmentService.registerSocket(socket);
+      
+      console.log(`🔗 Unified socket initialized for user: ${worxstreamUserId}`);
+      socket.emit('unified:connected', { status: 'connected', userId: worxstreamUserId });
+    } catch (error) {
+      console.error('❌ Error initializing unified socket:', error);
+      socket.emit('unified:error', { message: 'Failed to initialize unified socket' });
+    }
+  });
+
+  // Mail-specific initialization (for when user navigates to mail page)
+  socket.on('mail:init', async ({ worxstreamUserId, email }) => {
+    try {
+      // Store worxstreamUserId on socket for later use
+      socket.worxstreamUserId = worxstreamUserId;
+    
+      // Use the authenticated user's ID instead of the passed worxstreamUserId
+      const userId = socket.user?.id || worxstreamUserId;
+    
+      const token = await getToken(userId, email, 'outlook');
+      if (!token) {
+        // Check if user has any connected accounts
+        const userTokens = await getUserTokens(userId);
+        if (userTokens.length === 0) {
+          socket.emit('mail:error', 'No email accounts connected. Please connect your email account first.');
+          return;
+        } else {
+          socket.emit('mail:error', `Email account ${email} not connected. Please connect this account or use a connected account.`);
+          return;
+        }
+      }
+
+      const folders = await getMailFolders(token);
+      socket.emit('mail:folders', folders);
+    } catch (error) {
+      console.error('❌ Error in mail:init:', error);
+      socket.emit('mail:error', 'Failed to initialize mail service');
+    }
   });
 
   // New handler for enriching specific emails
-  socket.on('mail:enrichEmails', async ({ appUserId, email, messageIds }) => {
+  socket.on('mail:enrichEmails', async ({ worxstreamUserId, email, messageIds }) => {
     try {
-      console.log('🔄 Enrichment requested for messages:', messageIds);
-      
       // Get the messages that need enrichment
       const messages = await Email.find({ id: { $in: messageIds } });
       
       if (messages.length === 0) {
-        console.log('❌ No messages found for enrichment');
         return;
       }
 
@@ -48,56 +101,65 @@ export const initMailSocket = (socket, io) => {
       const messagesNeedingEnrichment = messages.filter(msg => !msg.aiMeta?.enrichedAt);
       
       if (messagesNeedingEnrichment.length > 0) {
-        console.log(`🔄 Starting enrichment for ${messagesNeedingEnrichment.length} messages`);
         await enrichmentQueueService.addToQueue(messagesNeedingEnrichment);
-      } else {
-        console.log('✅ All messages are already enriched');
       }
     } catch (error) {
-      console.error('❌ Error in mail:enrichEmails:', error);
       socket.emit('mail:error', 'Failed to start enrichment process');
     }
   });
 
   // 📥 INIT
-  socket.on('mail:init', async ({ appUserId, email }) => {
-    // Store appUserId on socket for later use
-    socket.appUserId = appUserId;
+      socket.on('mail:init', async ({ worxstreamUserId, email }) => {
+      // Store worxstreamUserId on socket for later use
+      socket.worxstreamUserId = worxstreamUserId;
     
-    const token = await getToken(appUserId, email, 'outlook');
-    if (!token) return socket.emit('mail:error', 'Token not found');
+    // Use the authenticated user's ID instead of the passed worxstreamUserId
+    const userId = socket.user?.id || worxstreamUserId;
+    
+    const token = await getToken(userId, email, 'outlook');
+    if (!token) {
+      // Check if user has any connected accounts
+      const userTokens = await getUserTokens(userId);
+      if (userTokens.length === 0) {
+        socket.emit('mail:error', 'No email accounts connected. Please connect your email account first.');
+        return;
+      } else {
+        socket.emit('mail:error', `Email account ${email} not connected. Please connect this account or use a connected account.`);
+        return;
+      }
+    }
 
     const folders = await getMailFolders(token);
     socket.emit('mail:folders', folders);
   });
 
   // 📁 Load paginated folder messages
-  socket.on('mail:getFolder', async ({ appUserId, email, folderId, page = 1 }) => {
-    try {
-      console.log(`📨 Processing folder request for ${email} in folder ${folderId}`);
-      
-      const token = await getToken(appUserId, email, 'outlook');
-      if (!token) {
-        console.error(`❌ Token not found for ${email}`);
-        return socket.emit('mail:error', 'Token not found');
-      }
+      socket.on('mail:getFolder', async ({ worxstreamUserId, email, folderId, page = 1 }) => {
+    const debounceKey = `getFolder:${worxstreamUserId}:${email}:${folderId}:${page}`;
+    
+    debounce(debounceKey, async () => {
+      try {
+        // Use the authenticated user's ID instead of the passed worxstreamUserId
+        const userId = socket.user?.id || worxstreamUserId;
+        
+        const token = await getToken(userId, email, 'outlook');
+        if (!token) {
+          return socket.emit('mail:error', 'Token not found');
+        }
 
-      const key = `${socket.id}-${folderId}`;
-      if (page === 1) folderPaginationMap.delete(key);
-      const nextLink = page === 1 ? null : folderPaginationMap.get(key);
+        const key = `${socket.id}-${folderId}`;
+        if (page === 1) folderPaginationMap.delete(key);
+        const nextLink = page === 1 ? null : folderPaginationMap.get(key);
 
-      const { messages, nextLink: newNextLink } = await getMessagesByFolder(token, folderId, nextLink);
-      if (newNextLink) folderPaginationMap.set(key, newNextLink);
+        const { messages, nextLink: newNextLink } = await getMessagesByFolder(token, folderId, nextLink);
+        if (newNextLink) folderPaginationMap.set(key, newNextLink);
 
-      // Get user from database
-      const user = await User.findOne({ appUserId });
-      if (!user) {
-        console.error(`❌ User not found for appUserId: ${appUserId}`);
-        socket.emit('mail:error', 'User not found');
-        return;
-      }
-
-      console.log(`🔄 Processing ${messages.length} messages`);
+        // Get user from database using the authenticated user's ID
+        const user = await User.findOne({ worxstreamUserId: userId });
+        if (!user) {
+          socket.emit('mail:error', 'User not found');
+          return;
+        }
 
       // Process messages efficiently
       const savedMessages = await Promise.all(messages.map(async msg => {
@@ -109,11 +171,13 @@ export const initMailSocket = (socket, io) => {
           if (existingMessage && 
               existingMessage.subject === (msg.subject || '(No Subject)') &&
               existingMessage.from === (msg.from || '') &&
+              existingMessage.to === (msg.to || '') &&
+              existingMessage.cc === (msg.cc || '') &&
+              existingMessage.bcc === (msg.bcc || '') &&
               existingMessage.preview === (msg.preview || '') &&
               existingMessage.read === (msg.read || false) &&
               existingMessage.important === (msg.important || false) &&
               existingMessage.flagged === (msg.flagged || false)) {
-            console.log(`⏭️ Skipping unchanged message ${msg.id}`);
             return existingMessage;
           }
 
@@ -123,6 +187,9 @@ export const initMailSocket = (socket, io) => {
             userId: user._id,
             email: email,
             from: msg.from || '',
+            to: msg.to || '',
+            cc: msg.cc || '',
+            bcc: msg.bcc || '',
             subject: msg.subject || '(No Subject)',
             content: msg.content || '',
             preview: msg.preview || '',
@@ -156,7 +223,6 @@ export const initMailSocket = (socket, io) => {
             }
           );
 
-          console.log(`✅ ${existingMessage ? 'Updated' : 'Saved new'} message ${msg.id}`);
           return savedMsg;
         } catch (error) {
           console.error(`❌ Failed to save message ${msg.id}:`, error);
@@ -165,7 +231,6 @@ export const initMailSocket = (socket, io) => {
       }));
 
       const validMessages = savedMessages.filter(Boolean);
-      console.log(`✅ Successfully processed ${validMessages.length} messages`);
 
       // Emit messages immediately
       socket.emit('mail:folderMessages', {
@@ -181,20 +246,22 @@ export const initMailSocket = (socket, io) => {
       console.error('❌ Error in mail:getFolder:', error);
       socket.emit('mail:error', 'Failed to process folder request');
     }
+    });
   });
 
   // 📧 Full message
-  socket.on('mail:getMessage', async ({ appUserId, email, messageId }) => {
+  socket.on('mail:getMessage', async ({ worxstreamUserId, email, messageId }) => {
     console.log(`[Debug] Getting message ${messageId} for ${email}`);
     try {
-      const token = await getToken(appUserId, email, 'outlook');
-      if (!token) return socket.emit('mail:error', 'Token not found');
-
-      const message = await getMessageById(token, messageId);
+      // Use emailService to get message with AI metadata combined
+      const emailService = await import('../services/emailService.js');
+      
+      const message = await emailService.default.getMessage(worxstreamUserId, email, messageId);
       console.log('[Debug] Message details being sent:', {
         id: message.id,
         hasAttachments: message.attachments?.length > 0,
-        attachmentCount: message.attachments?.length
+        attachmentCount: message.attachments?.length,
+        hasAiMeta: !!message.aiMeta
       });
 
       if (message) {
@@ -208,9 +275,31 @@ export const initMailSocket = (socket, io) => {
     }
   });
 
+  // 📎 Get attachments separately
+  socket.on('mail:getAttachments', async ({ worxstreamUserId, email, messageId }) => {
+    console.log(`[Debug] Getting attachments for message ${messageId} for ${email}`);
+    try {
+      const token = await getToken(worxstreamUserId, email, 'outlook');
+      if (!token) return socket.emit('mail:error', 'Token not found');
+
+      const { getAttachmentsByMessageId } = await import('../services/outlookService.js');
+      const attachments = await getAttachmentsByMessageId(token, messageId);
+      console.log('[Debug] Attachments being sent:', {
+        messageId,
+        attachmentCount: attachments.length,
+        attachments: attachments.map(att => ({ name: att.name, contentId: att.contentId, isInline: att.isInline }))
+      });
+
+      socket.emit('mail:attachments', { messageId, attachments });
+    } catch (error) {
+      console.error('Failed to get attachments:', error);
+      socket.emit('mail:error', error.message);
+    }
+  });
+
   // 📤 Send email
-  socket.on('mail:send', async ({ appUserId, email, to, subject, body, cc, bcc }) => {
-    const token = await getToken(appUserId, email, 'outlook');
+  socket.on('mail:send', async ({ worxstreamUserId, email, to, subject, body, cc, bcc }) => {
+    const token = await getToken(worxstreamUserId, email, 'outlook');
     if (!token) return socket.emit('mail:error', 'Token not found');
 
     const result = await sendEmail(token, { to, subject, body, cc, bcc });
@@ -218,11 +307,11 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 📧 Reply to email
-  socket.on('mail:reply', async ({ appUserId, email, messageId, comment, toRecipients, ccRecipients, bccRecipients }) => {
+  socket.on('mail:reply', async ({ worxstreamUserId, email, messageId, comment, toRecipients, ccRecipients, bccRecipients }) => {
     try {
       console.log(`📧 Reply requested for message ${messageId}`);
       
-      const token = await getToken(appUserId, email, 'outlook');
+      const token = await getToken(worxstreamUserId, email, 'outlook');
       if (!token) {
         console.error('❌ Token not found for:', email);
         return socket.emit('mail:error', 'Token not found');
@@ -250,11 +339,11 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 📧 Reply all to email
-  socket.on('mail:replyAll', async ({ appUserId, email, messageId, comment, toRecipients, ccRecipients, bccRecipients }) => {
+  socket.on('mail:replyAll', async ({ worxstreamUserId, email, messageId, comment, toRecipients, ccRecipients, bccRecipients }) => {
     try {
       console.log(`📧 Reply all requested for message ${messageId}`);
       
-      const token = await getToken(appUserId, email, 'outlook');
+      const token = await getToken(worxstreamUserId, email, 'outlook');
       if (!token) {
         console.error('❌ Token not found for:', email);
         return socket.emit('mail:error', 'Token not found');
@@ -282,8 +371,8 @@ export const initMailSocket = (socket, io) => {
   });
 
   // ✅ Mark as read
-  socket.on('mail:markRead', async ({ appUserId, email, messageId }) => {
-    const token = await getToken(appUserId, email, 'outlook');
+  socket.on('mail:markRead', async ({ worxstreamUserId, email, messageId }) => {
+    const token = await getToken(worxstreamUserId, email, 'outlook');
     if (!token) return;
 
     try {
@@ -295,8 +384,8 @@ export const initMailSocket = (socket, io) => {
   });
 
   // ⭐ Mark as important
-  socket.on('mail:markImportant', async ({ appUserId, email, messageId, flag }) => {
-    const token = await getToken(appUserId, email, 'outlook');
+  socket.on('mail:markImportant', async ({ worxstreamUserId, email, messageId, flag }) => {
+    const token = await getToken(worxstreamUserId, email, 'outlook');
     if (!token) return;
 
     try {
@@ -308,8 +397,8 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 🔄 Retry enrichment
-  socket.on('mail:retryEnrichment', async ({ appUserId, email, messageId }) => {
-    console.log('🔄 Retry enrichment requested for:', { appUserId, email, messageId });
+  socket.on('mail:retryEnrichment', async ({ worxstreamUserId, email, messageId }) => {
+    console.log('🔄 Retry enrichment requested for:', { worxstreamUserId, email, messageId });
     try {
       const emailDoc = await Email.findOne({ id: messageId });
       if (!emailDoc) {
@@ -328,16 +417,16 @@ export const initMailSocket = (socket, io) => {
       });
       console.log('✅ Reset enrichment status');
 
-      // Get user to get appUserId
-      const user = await User.findOne({ appUserId });
+      // Get user to get worxstreamUserId
+      const user = await User.findOne({ worxstreamUserId });
       if (!user) {
-        console.error('❌ User not found:', appUserId);
+        console.error('❌ User not found:', worxstreamUserId);
         socket.emit('mail:error', 'User not found');
         return;
       }
 
       // Get fresh message content
-      const token = await getToken(appUserId, email, 'outlook');
+      const token = await getToken(worxstreamUserId, email, 'outlook');
       if (!token) {
         console.error('❌ Token not found for:', email);
         socket.emit('mail:error', 'Token not found');
@@ -376,11 +465,11 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 🗑️ Delete message
-  socket.on('mail:delete', async ({ appUserId, email, messageId }) => {
+  socket.on('mail:delete', async ({ worxstreamUserId, email, messageId }) => {
     try {
-      console.log('🗑️ Delete message requested:', { appUserId, email, messageId });
+      console.log('🗑️ Delete message requested:', { worxstreamUserId, email, messageId });
       
-      const token = await getToken(appUserId, email, 'outlook');
+      const token = await getToken(worxstreamUserId, email, 'outlook');
       if (!token) {
         console.error('❌ Token not found for:', email);
         return socket.emit('mail:error', 'Token not found');
@@ -393,7 +482,7 @@ export const initMailSocket = (socket, io) => {
       }
 
       // Delete from our database and update counts
-      await emailService.deleteMessage(appUserId, email, messageId);
+      await emailService.deleteMessage(worxstreamUserId, email, messageId);
       console.log('✅ Message deleted successfully:', messageId);
 
       // Notify client of successful deletion
@@ -405,14 +494,14 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 🏷️ Update email category
-  socket.on('mail:updateCategory', async ({ appUserId, email, messageId, category }) => {
+  socket.on('mail:updateCategory', async ({ worxstreamUserId, email, messageId, category }) => {
     try {
-      console.log('🏷️ Update category requested:', { appUserId, email, messageId, category });
+      console.log('🏷️ Update category requested:', { worxstreamUserId, email, messageId, category });
       
       // Get user to verify they exist
-      const user = await User.findOne({ appUserId });
+      const user = await User.findOne({ worxstreamUserId });
       if (!user) {
-        console.error('❌ User not found:', appUserId);
+        console.error('❌ User not found:', worxstreamUserId);
         return socket.emit('mail:error', 'User not found');
       }
 

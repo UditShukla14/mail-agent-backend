@@ -21,7 +21,7 @@ export const registerUser = async (req, res) => {
 
     // Generate token for the new user
     const token = jwt.sign(
-      { userId: user._id, appUserId: user.appUserId, email: user.email },
+      { userId: user._id, worxstreamUserId: user.worxstreamUserId, email: user.email },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -39,8 +39,8 @@ export const registerUser = async (req, res) => {
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
-    // Set the appUserId as a cookie for middleware auth
-    res.cookie('appUserId', user.appUserId, {
+    // Set the worxstreamUserId as a cookie for middleware auth
+    res.cookie('worxstreamUserId', user.worxstreamUserId, {
       httpOnly: false, // Can be read by the browser if needed
       secure: isProduction,
       sameSite: cookieSameSite,
@@ -52,7 +52,7 @@ export const registerUser = async (req, res) => {
     res.status(201).json({
       message: 'User registered successfully.',
       token,
-      appUserId: user.appUserId
+      worxstreamUserId: user.worxstreamUserId
     });
   } catch (err) {
     console.error('Registration error:', err.message);
@@ -74,7 +74,7 @@ export const loginUser = async (req, res) => {
     if (!match) return res.status(401).json({ error: 'Invalid credentials.' });
 
     const token = jwt.sign(
-      { userId: user._id, appUserId: user.appUserId, email: user.email },
+      { userId: user._id, worxstreamUserId: user.worxstreamUserId, email: user.email },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -92,8 +92,8 @@ export const loginUser = async (req, res) => {
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
-    // Set the appUserId as a cookie for middleware auth
-    res.cookie('appUserId', user.appUserId, {
+    // Set the worxstreamUserId as a cookie for middleware auth
+    res.cookie('worxstreamUserId', user.worxstreamUserId, {
       httpOnly: false, // Can be read by the browser if needed
       secure: isProduction,
       sameSite: cookieSameSite,
@@ -102,7 +102,7 @@ export const loginUser = async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
 
-    res.json({ token, appUserId: user.appUserId });
+    res.json({ token, worxstreamUserId: user.worxstreamUserId });
   } catch (err) {
     console.error('Login error:', err.message);
     res.status(500).json({ error: 'Internal server error.' });
@@ -112,20 +112,20 @@ export const loginUser = async (req, res) => {
 // GET /profile - Get user profile data
 export const getUserProfile = async (req, res) => {
   try {
-    const { appUserId } = req.query;
+    const { worxstreamUserId } = req.query;
     
-    if (!appUserId) {
-      return res.status(400).json({ error: 'appUserId is required' });
+    if (!worxstreamUserId) {
+      return res.status(400).json({ error: 'worxstreamUserId is required' });
     }
 
     // Get user details
-    const user = await User.findOne({ appUserId });
+    const user = await User.findOne({ worxstreamUserId });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     // Get linked accounts
-    const tokens = await Token.find({ appUserId });
+    const tokens = await Token.find({ worxstreamUserId });
     const linkedAccounts = tokens.map(token => ({
       email: token.email,
       provider: token.provider,
@@ -140,7 +140,7 @@ export const getUserProfile = async (req, res) => {
     const profile = {
       user: {
         email: user.email,
-        appUserId: user.appUserId,
+        worxstreamUserId: user.worxstreamUserId,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt
       },

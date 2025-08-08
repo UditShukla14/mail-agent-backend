@@ -182,6 +182,7 @@ async function getMessageById(accessToken, messageId) {
       from: `${parsed.from?.text || ''}`,
       to: `${parsed.to?.text || ''}`,
       cc: `${parsed.cc?.text || ''}`,
+      bcc: `${parsed.bcc?.text || ''}`,
       subject: parsed.subject || '',
       content: parsed.html || parsed.textAsHtml || '',
       timestamp: parsed.date?.toISOString() || new Date().toISOString(),
@@ -203,7 +204,7 @@ async function getMessagesByFolder(accessToken, folderId, nextLink = null, top =
   try {
     const url = nextLink
       ? nextLink
-      : `https://graph.microsoft.com/v1.0/me/mailFolders/${folderId}/messages?$top=${top}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,bodyPreview,body,receivedDateTime,isRead,importance,flag,conversationId`;
+      : `https://graph.microsoft.com/v1.0/me/mailFolders/${folderId}/messages?$top=${top}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bccRecipients,bodyPreview,body,receivedDateTime,isRead,importance,flag,conversationId`;
 
     const res = await axios.get(url, {
       headers: { Authorization: `Bearer ${accessToken}` }
@@ -214,6 +215,8 @@ async function getMessagesByFolder(accessToken, folderId, nextLink = null, top =
         id: msg.id,
         from: `${msg.from?.emailAddress?.name || ''} <${msg.from?.emailAddress?.address || ''}>`,
         to: msg.toRecipients?.map(r => `${r.emailAddress?.name || ''} <${r.emailAddress?.address || ''}>`).join(', ') || '',
+        cc: msg.ccRecipients?.map(r => `${r.emailAddress?.name || ''} <${r.emailAddress?.address || ''}>`).join(', ') || '',
+        bcc: msg.bccRecipients?.map(r => `${r.emailAddress?.name || ''} <${r.emailAddress?.address || ''}>`).join(', ') || '',
         subject: msg.subject || '(No Subject)',
         preview: msg.bodyPreview || '',
         content: msg.body?.content || '',

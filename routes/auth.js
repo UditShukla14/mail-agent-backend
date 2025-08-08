@@ -7,18 +7,19 @@ import {
   gmailRedirect, 
   handleCallback 
 } from '../controllers/authController.js';
+import { authenticateUser, validateMailAccess } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// 🌐 Outlook OAuth Flow
-router.get('/outlook/login', outlookLogin);
-router.get('/outlook/redirect', outlookRedirect);
+// OAuth login endpoints (require worXstream authentication)
+router.get('/outlook/login', authenticateUser, validateMailAccess, outlookLogin);
+router.get('/gmail/login', authenticateUser, validateMailAccess, gmailLogin);
 
-// 🌐 Gmail OAuth Flow
-router.get('/gmail/login', gmailLogin);
+// OAuth callback endpoints (no auth required as they're called by OAuth providers)
+router.get('/outlook/redirect', outlookRedirect);
 router.get('/gmail/redirect', gmailRedirect);
 
-// 🔄 OAuth Callback Handler
-router.post('/callback', handleCallback);
+// Frontend callback verification (requires worXstream authentication)
+router.post('/callback', authenticateUser, validateMailAccess, handleCallback);
 
 export default router;

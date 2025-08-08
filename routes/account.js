@@ -4,42 +4,134 @@ import Token from '../models/Token.js';
 import Email from '../models/email.js';
 import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
+import { authenticateUser, validateMailAccess } from '../middleware/auth.js';
+import { getUserTokens, deleteToken } from '../utils/tokenManager.js';
 
 const router = express.Router();
 
-router.get('/accounts', async (req, res) => {
-  const { appUserId } = req.query;
-  if (!appUserId) return res.status(400).json({ error: 'Missing appUserId' });
-
-  const tokens = await Token.find({ appUserId });
-  const accounts = tokens.map(token => ({
-    email: token.email,
-    provider: token.provider
-  }));
-  
-  res.json({ accounts });
+// Get all connected accounts for the authenticated user
+router.get('/accounts', authenticateUser, validateMailAccess, async (req, res) => {
+  try {
+    const worxstreamUserId = req.user.id;
+    const worxstreamUser = req.user;
+    
+    console.log(`🔄 Getting accounts for worXstream user: ${worxstreamUserId} (${worxstreamUser.email})`);
+    console.log(`📋 Full user object:`, JSON.stringify(worxstreamUser, null, 2));
+    
+    // Check if user exists in mail agent database
+    let user = await User.findOne({ worxstreamUserId });
+    
+    if (!user) {
+      console.log(`📝 Creating new user in mail agent database for worXstream user: ${worxstreamUserId}`);
+      
+      // Create new user in mail agent database
+      user = new User({
+        worxstreamUserId: worxstreamUserId,
+        name: worxstreamUser.name,
+        email: worxstreamUser.email,
+        email_verified_at: worxstreamUser.email_verified_at,
+        status: worxstreamUser.status,
+        is_admin: worxstreamUser.is_admin,
+        created_at: worxstreamUser.created_at,
+        updated_at: worxstreamUser.updated_at
+      });
+      
+      await user.save();
+      console.log(`✅ Created new user in mail agent database: ${user._id}`);
+    } else {
+      console.log(`✅ Found existing user in mail agent database: ${user._id}`);
+    }
+    
+    // Get email accounts from EmailAccount model (like original mail-agent)
+    const emailAccounts = await EmailAccount.find({ userId: user._id });
+    
+    // Also get tokens to check if accounts are still connected
+    const tokens = await getUserTokens(worxstreamUserId);
+    const tokenMap = new Map(tokens.map(token => [token.email, token]));
+    
+    // Create EmailAccount records for any tokens that don't have them
+    for (const token of tokens) {
+      const existingAccount = emailAccounts.find(account => account.email === token.email);
+      if (!existingAccount) {
+        console.log(`🔄 Creating missing EmailAccount record for ${token.email}`);
+        try {
+          const newEmailAccount = new EmailAccount({
+            userId: user._id,
+            email: token.email,
+            provider: token.provider,
+            isActive: true
+          });
+          await newEmailAccount.save();
+          console.log(`✅ Created EmailAccount record for ${token.email}`);
+          emailAccounts.push(newEmailAccount);
+        } catch (error) {
+          console.error(`❌ Failed to create EmailAccount record for ${token.email}:`, error);
+        }
+      }
+    }
+    
+    const accounts = emailAccounts.map(account => {
+      const token = tokenMap.get(account.email);
+      return {
+        id: account._id.toString(),
+        email: account.email,
+        provider: account.provider,
+        isActive: account.isActive,
+        categories: account.categories,
+        isExpired: token ? token.isExpired : true, // If no token, consider expired
+        createdAt: account.createdAt,
+        updatedAt: account.updatedAt
+      };
+    });
+    
+    console.log(`📧 Found ${accounts.length} email accounts for user: ${worxstreamUserId}`);
+    
+    res.json({ 
+      success: true,
+      data: accounts,
+      userExists: true
+    });
+  } catch (error) {
+    console.error('Error fetching accounts:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch accounts',
+      details: error.message 
+    });
+  }
 });
 
-router.delete('/unlink', async (req, res) => {
+// Unlink an email account
+router.delete('/unlink', authenticateUser, validateMailAccess, async (req, res) => {
   try {
-    const { appUserId, email } = req.body;
+    const worxstreamUserId = req.user.id;
+    const { email } = req.body;
     
-    if (!appUserId || !email) {
-      return res.status(400).json({ error: 'Missing appUserId or email' });
+    if (!email) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Missing email parameter' 
+      });
     }
 
-    console.log(`🔄 Unlinking account: ${email} for user: ${appUserId}`);
+    console.log(`🔄 Unlinking account: ${email} for worXstream user: ${worxstreamUserId}`);
 
     // Find the user to get their MongoDB _id
-    const user = await User.findOne({ appUserId });
+    const user = await User.findOne({ worxstreamUserId });
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'User not found' 
+      });
     }
 
     // Delete the token for this account
-    const tokenResult = await Token.deleteOne({ appUserId, email });
-    if (tokenResult.deletedCount === 0) {
-      return res.status(404).json({ error: 'Account not found or already unlinked' });
+    const tokenDeleted = await deleteToken(worxstreamUserId, email);
+    if (!tokenDeleted) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Account not found or already unlinked' 
+      });
     }
 
     // Delete all emails associated with this account
@@ -68,6 +160,7 @@ router.delete('/unlink', async (req, res) => {
   } catch (error) {
     console.error('❌ Error unlinking account:', error);
     res.status(500).json({ 
+      success: false,
       error: 'Failed to unlink account',
       details: error.message 
     });
