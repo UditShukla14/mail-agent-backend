@@ -5,7 +5,7 @@ import Email from '../models/email.js';
 import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
 import { authenticateUser } from '../middleware/auth.js';
-import { getUserTokens, deleteToken } from '../utils/tokenManager.js';
+import { getToken, getUserTokens, deleteToken } from '../utils/tokenManager.js';
 import { searchMessages as searchOutlookMessages } from '../services/outlookService.js';
 import { searchMessages as searchGmailMessages } from '../services/gmailService.js';
 
@@ -184,42 +184,39 @@ router.post('/search', authenticateUser, async (req, res) => {
 
     console.log(`🔍 Search request for user ${worxstreamUserId}, email: ${email}, query: "${query}"`);
 
-    // Get user token for the specified email
-    const tokens = await getUserTokens(worxstreamUserId);
-    console.log(`🔑 Found ${tokens.length} tokens for user ${worxstreamUserId}`);
-    console.log(`🔑 Token emails:`, tokens.map(t => ({ email: t.email, provider: t.provider, isExpired: t.isExpired })));
+    // Get user token for the specified email using getToken (same as other functions)
+    let accessToken;
+    let provider;
     
-    const token = tokens.find(t => t.email === email);
-    
-    if (!token) {
-      console.log(`❌ Token not found for email: ${email}`);
-      return res.status(404).json({ 
-        success: false,
-        error: 'Email account not found or not connected' 
-      });
-    }
-
-    console.log(`✅ Token found for ${email}, provider: ${token.provider}, expired: ${token.isExpired}`);
-    console.log(`🔑 Token access token length: ${token.accessToken ? token.accessToken.length : 0}`);
-
-    if (token.isExpired) {
-      console.log(`❌ Token is expired for email: ${email}`);
-      return res.status(401).json({ 
-        success: false,
-        error: 'Email account token has expired. Please reconnect your account.' 
-      });
+    // Try Outlook first
+    accessToken = await getToken(worxstreamUserId, email, 'outlook');
+    if (accessToken) {
+      provider = 'outlook';
+      console.log(`✅ Found Outlook token for ${email}, token length: ${accessToken.length}`);
+    } else {
+      // Try Gmail
+      accessToken = await getToken(worxstreamUserId, email, 'gmail');
+      if (accessToken) {
+        provider = 'gmail';
+        console.log(`✅ Found Gmail token for ${email}, token length: ${accessToken.length}`);
+      } else {
+        console.log(`❌ No token found for email: ${email}`);
+        return res.status(404).json({ 
+          success: false,
+          error: 'Email account not found or not connected' 
+        });
+      }
     }
 
     let searchResult;
     
-    console.log(`🔍 Calling search function for provider: ${token.provider}`);
+    console.log(`🔍 Calling search function for provider: ${provider}`);
     
-    if (token.provider === 'outlook') {
-      console.log(`📧 Searching Outlook with query: "${query}", folderId: ${folderId}, limit: ${limit}`);
+    if (provider === 'outlook') {
+      console.log(`📧 Searching Outlook with query: "${query}", limit: ${limit}`);
       searchResult = await searchOutlookMessages(
-        token.accessToken, 
+        accessToken, 
         query, 
-        folderId, 
         limit
       );
       console.log(`📧 Outlook search result:`, {
@@ -227,10 +224,10 @@ router.post('/search', authenticateUser, async (req, res) => {
         hasNextLink: !!searchResult.nextLink,
         totalCount: searchResult.totalCount
       });
-    } else if (token.provider === 'gmail') {
+    } else if (provider === 'gmail') {
       console.log(`📨 Searching Gmail with query: "${query}", folderId: ${folderId}, limit: ${limit}`);
       searchResult = await searchGmailMessages(
-        token.accessToken, 
+        accessToken, 
         query, 
         folderId, 
         limit
@@ -241,7 +238,7 @@ router.post('/search', authenticateUser, async (req, res) => {
         totalCount: searchResult.totalCount
       });
     } else {
-      console.log(`❌ Unsupported provider: ${token.provider}`);
+      console.log(`❌ Unsupported provider: ${provider}`);
       return res.status(400).json({ 
         success: false,
         error: 'Unsupported email provider' 
@@ -287,32 +284,38 @@ router.get('/test-emails', authenticateUser, async (req, res) => {
 
     console.log(`🧪 Test getting recent emails for user ${worxstreamUserId}, email: ${email}`);
 
-    // Get user token for the specified email
-    const tokens = await getUserTokens(worxstreamUserId);
-    const token = tokens.find(t => t.email === email);
+    // Get user token for the specified email using getToken (same as other functions)
+    let accessToken;
+    let provider;
     
-    if (!token) {
-      return res.status(404).json({ 
-        success: false,
-        error: 'Email account not found or not connected' 
-      });
-    }
-
-    if (token.isExpired) {
-      return res.status(401).json({ 
-        success: false,
-        error: 'Email account token has expired' 
-      });
+    // Try Outlook first
+    accessToken = await getToken(worxstreamUserId, email, 'outlook');
+    if (accessToken) {
+      provider = 'outlook';
+      console.log(`✅ Found Outlook token for ${email}, token length: ${accessToken.length}`);
+    } else {
+      // Try Gmail
+      accessToken = await getToken(worxstreamUserId, email, 'gmail');
+      if (accessToken) {
+        provider = 'gmail';
+        console.log(`✅ Found Gmail token for ${email}, token length: ${accessToken.length}`);
+      } else {
+        console.log(`❌ No token found for email: ${email}`);
+        return res.status(404).json({ 
+          success: false,
+          error: 'Email account not found or not connected' 
+        });
+      }
     }
 
     let result;
     
-    if (token.provider === 'outlook') {
+    if (provider === 'outlook') {
       const { getMessagesByFolder } = await import('../services/outlookService.js');
-      result = await getMessagesByFolder(token.accessToken, 'inbox', null, 5);
-    } else if (token.provider === 'gmail') {
+      result = await getMessagesByFolder(accessToken, 'inbox', null, 5);
+    } else if (provider === 'gmail') {
       const { getMessagesByFolder } = await import('../services/gmailService.js');
-      result = await getMessagesByFolder(token.accessToken, 'INBOX', null, 5);
+      result = await getMessagesByFolder(accessToken, 'INBOX', null, 5);
     } else {
       return res.status(400).json({ 
         success: false,
@@ -354,30 +357,36 @@ router.get('/test-search', authenticateUser, async (req, res) => {
 
     console.log(`🧪 Test search for user ${worxstreamUserId}, email: ${email}, query: "${query}"`);
 
-    // Get user token for the specified email
-    const tokens = await getUserTokens(worxstreamUserId);
-    const token = tokens.find(t => t.email === email);
+    // Get user token for the specified email using getToken (same as other functions)
+    let accessToken;
+    let provider;
     
-    if (!token) {
-      return res.status(404).json({ 
-        success: false,
-        error: 'Email account not found or not connected' 
-      });
-    }
-
-    if (token.isExpired) {
-      return res.status(401).json({ 
-        success: false,
-        error: 'Email account token has expired' 
-      });
+    // Try Outlook first
+    accessToken = await getToken(worxstreamUserId, email, 'outlook');
+    if (accessToken) {
+      provider = 'outlook';
+      console.log(`✅ Found Outlook token for ${email}, token length: ${accessToken.length}`);
+    } else {
+      // Try Gmail
+      accessToken = await getToken(worxstreamUserId, email, 'gmail');
+      if (accessToken) {
+        provider = 'gmail';
+        console.log(`✅ Found Gmail token for ${email}, token length: ${accessToken.length}`);
+      } else {
+        console.log(`❌ No token found for email: ${email}`);
+        return res.status(404).json({ 
+          success: false,
+          error: 'Email account not found or not connected' 
+        });
+      }
     }
 
     let searchResult;
     
-    if (token.provider === 'outlook') {
-      searchResult = await searchOutlookMessages(token.accessToken, query, null, 5);
-    } else if (token.provider === 'gmail') {
-      searchResult = await searchGmailMessages(token.accessToken, query, null, 5);
+    if (provider === 'outlook') {
+      searchResult = await searchOutlookMessages(accessToken, query, 5);
+    } else if (provider === 'gmail') {
+      searchResult = await searchGmailMessages(accessToken, query, null, 5);
     } else {
       return res.status(400).json({ 
         success: false,
@@ -420,32 +429,38 @@ router.get('/folders', authenticateUser, async (req, res) => {
 
     console.log(`📂 Getting folders for user ${worxstreamUserId}, email: ${email}`);
 
-    // Get user token for the specified email
-    const tokens = await getUserTokens(worxstreamUserId);
-    const token = tokens.find(t => t.email === email);
+    // Get user token for the specified email using getToken (same as other functions)
+    let accessToken;
+    let provider;
     
-    if (!token) {
-      return res.status(404).json({ 
-        success: false,
-        error: 'Email account not found or not connected' 
-      });
-    }
-
-    if (token.isExpired) {
-      return res.status(401).json({ 
-        success: false,
-        error: 'Email account token has expired. Please reconnect your account.' 
-      });
+    // Try Outlook first
+    accessToken = await getToken(worxstreamUserId, email, 'outlook');
+    if (accessToken) {
+      provider = 'outlook';
+      console.log(`✅ Found Outlook token for ${email}, token length: ${accessToken.length}`);
+    } else {
+      // Try Gmail
+      accessToken = await getToken(worxstreamUserId, email, 'gmail');
+      if (accessToken) {
+        provider = 'gmail';
+        console.log(`✅ Found Gmail token for ${email}, token length: ${accessToken.length}`);
+      } else {
+        console.log(`❌ No token found for email: ${email}`);
+        return res.status(404).json({ 
+          success: false,
+          error: 'Email account not found or not connected' 
+        });
+      }
     }
 
     let folders;
     
-    if (token.provider === 'outlook') {
+    if (provider === 'outlook') {
       const { getMailFolders } = await import('../services/outlookService.js');
-      folders = await getMailFolders(token.accessToken);
-    } else if (token.provider === 'gmail') {
+      folders = await getMailFolders(accessToken);
+    } else if (provider === 'gmail') {
       const { getMailFolders } = await import('../services/gmailService.js');
-      folders = await getMailFolders(token.accessToken);
+      folders = await getMailFolders(accessToken);
     } else {
       return res.status(400).json({ 
         success: false,

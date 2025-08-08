@@ -212,6 +212,7 @@ export const getUserTokens = async (worxstreamUserId) => {
     return tokens.map(token => ({
       email: token.email,
       provider: token.provider,
+      accessToken: token.access_token, // Include the actual access token
       expires_in: token.expires_in,
       timestamp: token.timestamp,
       isExpired: Date.now() > token.timestamp + token.expires_in * 1000 - 60000
