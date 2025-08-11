@@ -191,9 +191,13 @@ router.delete('/unlink', authenticateUser, async (req, res) => {
     }
 
     console.log(`🔄 Unlinking account: ${email} for worXstream user: ${worxstreamUserId}`);
+    console.log(`🔍 Request body:`, req.body);
+    console.log(`🔍 User ID type:`, typeof worxstreamUserId, 'Value:', worxstreamUserId);
+    console.log(`🔍 Email:`, email, 'Provider:', provider);
 
     // Find the user to get their MongoDB _id
     const user = await User.findOne({ worxstreamUserId });
+    console.log(`🔍 User lookup result:`, user ? 'Found' : 'Not found');
     if (!user) {
       return res.status(404).json({ 
         success: false,
@@ -201,8 +205,14 @@ router.delete('/unlink', authenticateUser, async (req, res) => {
       });
     }
 
+    // Check what tokens exist for this user
+    const userTokens = await getUserTokens(worxstreamUserId);
+    console.log(`🔍 Available tokens for user:`, userTokens.map(t => ({ email: t.email, provider: t.provider })));
+    
     // Delete the token for this account
-    const tokenDeleted = await deleteToken(worxstreamUserId, email);
+    const tokenDeleted = await deleteToken(worxstreamUserId, email, provider);
+    console.log(`🔍 Token deletion result:`, tokenDeleted);
+    
     if (!tokenDeleted) {
       return res.status(404).json({ 
         success: false,

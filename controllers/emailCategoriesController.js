@@ -54,12 +54,12 @@ export const getEmailCategories = async (req, res) => {
 
     if (!emailAccount) {
       console.log('🆕 Creating new email account for:', targetEmail);
-      // Create new email account with default categories
+      // Create new email account without categories - user must set them up
       emailAccount = new EmailAccount({
         userId: user._id,
         email: targetEmail,
         provider: 'outlook' // Default, can be updated later
-        // categories will use default from schema
+        // categories will be empty - user must select them
       });
       await emailAccount.save();
       console.log('✅ New email account created with ID:', emailAccount._id);
@@ -139,6 +139,7 @@ export const updateEmailCategories = async (req, res) => {
         userId: user._id,
         email: targetEmail,
         provider: 'outlook'
+        // categories will be empty - user must select them
       });
     }
 
@@ -205,6 +206,7 @@ export const addEmailCategory = async (req, res) => {
         userId: user._id,
         email: targetEmail,
         provider: 'outlook'
+        // categories will be empty - user must select them
       });
     }
 

@@ -254,8 +254,11 @@ export const refreshToken = async (refresh_token, provider) => {
 // 🗑️ Delete token for a user
 export const deleteToken = async (worxstreamUserId, email, provider) => {
   try {
-    console.log(`🔄 Deleting token for ${email} (${provider}) with worxstreamUserId: ${worxstreamUserId}`);
-    const result = await Token.deleteOne({ worxstreamUserId, email, provider });
+    // Ensure worxstreamUserId is a number
+    const numericUserId = Number(worxstreamUserId);
+    console.log(`🔄 Deleting token for ${email} (${provider}) with worxstreamUserId: ${worxstreamUserId} (converted to: ${numericUserId})`);
+    
+    const result = await Token.deleteOne({ worxstreamUserId: numericUserId, email, provider });
     
     if (result.deletedCount > 0) {
       console.log(`✅ Token deleted for ${email}`);
