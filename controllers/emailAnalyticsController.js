@@ -321,10 +321,30 @@ export const getEmailAnalytics = async (req, res) => {
 
         // Merge categories from EmailAccount with actual email counts
     const categories = allCategories.map(category => {
-      // Find matching email category by exact name match
-      const emailCategory = emailCategories.find(ec => ec._id === category.name);
+      // Match email category by the label (user-facing text) since emails store the label value
+      let emailCategory = emailCategories.find(ec => ec._id === category.label);
       
-      console.log(`🔍 Analytics: Category "${category.name}" - Found email category:`, emailCategory);
+      if (!emailCategory) {
+        // Try case-insensitive match on label
+        emailCategory = emailCategories.find(ec => 
+          ec._id.toLowerCase() === category.label.toLowerCase()
+        );
+      }
+      
+      if (!emailCategory) {
+        // Try normalized match (handle spaces, underscores, case differences)
+        const normalizedLabel = category.label.toLowerCase().replace(/[_\s]/g, '');
+        emailCategory = emailCategories.find(ec => {
+          const normalizedEmailCategory = ec._id.toLowerCase().replace(/[_\s]/g, '');
+          return normalizedEmailCategory === normalizedLabel;
+        });
+      }
+      
+      if (emailCategory) {
+        console.log(`🔍 Analytics: Category "${category.name}" (label: "${category.label}") matched: "${emailCategory._id}" -> "${category.label}"`);
+      } else {
+        console.log(`🔍 Analytics: Category "${category.name}" (label: "${category.label}") - No matching emails found`);
+      }
       
       return {
         name: category.name,
