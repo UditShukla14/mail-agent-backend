@@ -7,7 +7,7 @@ import cookieParser from 'cookie-parser';
 import { initMailSocket } from './sockets/mailSocket.js';
 import connectDB from './utils/db.js';
 import emailEnrichmentService from './services/emailEnrichment.js';
-import axios from 'axios'; // Added axios for token verification
+
 
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
@@ -22,6 +22,12 @@ import tokenRefreshService from './services/tokenRefreshService.js';
 import notificationService from './services/notificationService.js';
 
 dotenv.config();
+
+// Environment Variables:
+// - NODE_ENV: Set to 'development' for verbose logging, 'production' for minimal logging
+// - JWT_SECRET: Secret key for JWT token verification (required for production)
+// - WORXSTREAM_API_URL: URL of worXstream API for token verification (optional)
+// - WORXSTREAM_API_TOKEN: API token for worXstream API calls (optional)
 
 const app = express();
 const httpServer = createServer(app);
@@ -171,79 +177,117 @@ io.use(async (socket, next) => {
       return next(new Error('Authentication required'));
     }
 
-    // Check for user info in query parameters (from frontend)
-    const userInfoQuery = socket.handshake.query?.userInfo;
-    let userInfo = null;
-    if (userInfoQuery) {
-      try {
-        userInfo = JSON.parse(userInfoQuery);
-        console.log('📋 User info from query:', userInfo);
-      } catch (error) {
-        console.error('Error parsing user info query:', error);
-      }
-    }
-
-    // Verify token with worXstream API
+    // Verify the token and extract user info (SECURE)
     try {
-      const worxstreamApiUrl = process.env.WORXSTREAM_API_URL || 'http://localhost:8080';
-      const response = await axios.get(`${worxstreamApiUrl}/api/user-info`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (response.data.success) {
-        socket.user = response.data.user;
+      // For now, we'll use a simple approach - you should implement proper JWT verification
+      // This is a placeholder - replace with your actual token verification logic
+      const userInfo = await verifyAndExtractUserInfo(token);
+      
+      if (userInfo && userInfo.id && userInfo.email) {
+        console.log('✅ Token verified, user authenticated:', userInfo.email);
+        socket.user = userInfo;
         socket.token = token;
-        console.log('✅ Socket authenticated for user:', socket.user.email);
         next();
+        return;
       } else {
-        console.log('❌ Token verification failed');
-        next(new Error('Invalid token'));
+        console.log('❌ Invalid user info from token');
+        next(new Error('Authentication failed: Invalid user info'));
+        return;
       }
     } catch (error) {
-      console.error('❌ Token verification error:', error.message);
-      console.error('❌ Full error details:', {
-        message: error.message,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data,
-        url: `${process.env.WORXSTREAM_API_URL || 'http://localhost:8080'}/api/user-info`
-      });
-      
-      // In development mode, allow connection with fallback
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🔧 Development mode: Allowing socket connection with fallback');
-        // Use user info from headers if available, otherwise use fallback
-        if (userInfo) {
-          socket.user = userInfo;
-          console.log('✅ Using user info from headers for socket authentication');
-        } else {
-          socket.user = { id: 10000000021, email: 'dev@example.com' };
-          console.log('⚠️ Using fallback user info for socket authentication');
-        }
-        socket.token = token;
-        next();
-      } else {
-        // In production, allow connection with user info from query if token verification fails
-        // This is a temporary fix until the worXstream API is properly configured
-        console.log('🔧 Production mode: Allowing socket connection with user info from query');
-        if (userInfo) {
-          socket.user = userInfo;
-          console.log('✅ Using user info from query for socket authentication');
-          socket.token = token;
-          next();
-        } else {
-          console.log('❌ No user info available for fallback authentication');
-          next(new Error('Authentication failed'));
-        }
-      }
+      console.error('❌ Token verification failed:', error.message);
+      next(new Error('Authentication failed: Invalid token'));
+      return;
     }
   } catch (error) {
     console.error('❌ Socket authentication error:', error);
     next(error);
   }
 });
+
+// JWT token verification function
+async function verifyAndExtractUserInfo(token) {
+  try {
+    // Remove 'Bearer ' prefix if present
+    const cleanToken = token.startsWith('Bearer ') ? token.slice(7) : token;
+    
+    // First, try to verify as JWT token
+    try {
+      const jwt = await import('jsonwebtoken');
+      const decoded = jwt.verify(cleanToken, process.env.JWT_SECRET || 'your-secret-key');
+      
+      if (decoded.id || decoded.userId) {
+        return {
+          id: decoded.id || decoded.userId,
+          email: decoded.email
+        };
+      }
+    } catch (jwtError) {
+      console.log('🔍 Token is not a valid JWT, trying alternative verification...');
+    }
+    
+    // Alternative: Verify with worXstream API if configured
+    if (process.env.WORXSTREAM_API_URL && process.env.WORXSTREAM_API_TOKEN) {
+      try {
+        const axios = await import('axios');
+        const response = await axios.default.get(`${process.env.WORXSTREAM_API_URL}/api/user-info`, {
+          headers: {
+            'Authorization': `Bearer ${cleanToken}`
+          },
+          timeout: 5000
+        });
+        
+        if (response.data && response.data.user) {
+          return {
+            id: response.data.user.id || response.data.user.userId,
+            email: response.data.user.email
+          };
+        }
+      } catch (apiError) {
+        console.log('🔍 API verification failed, trying local verification...');
+      }
+    }
+    
+    // Local verification: Check if token matches a user in our database
+    try {
+      const User = await import('./models/User.js');
+      const user = await User.default.findOne({ 
+        $or: [
+          { 'tokens.token': cleanToken },
+          { 'authToken': cleanToken },
+          { 'sessionToken': cleanToken }
+        ]
+      });
+      
+      if (user) {
+        return {
+          id: user._id.toString(),
+          email: user.email
+        };
+      }
+    } catch (dbError) {
+      console.log('🔍 Database verification failed...');
+    }
+    
+    // Development fallback: Try to decode as base64 (INSECURE - only for development)
+    if (process.env.NODE_ENV === 'development') {
+      try {
+        const decoded = JSON.parse(Buffer.from(cleanToken, 'base64').toString());
+        if (decoded.id && decoded.email) {
+          console.log('⚠️ DEVELOPMENT MODE: Using base64 decoded token');
+          return decoded;
+        }
+      } catch (base64Error) {
+        // Not a base64 token
+      }
+    }
+    
+    // If all verification methods fail, reject the token
+    throw new Error('Token verification failed: Invalid or expired token');
+  } catch (error) {
+    throw new Error(`Token verification failed: ${error.message}`);
+  }
+}
 
 io.on('connection', (socket) => {
   console.log('🔌 New client connected:', socket.id, 'User:', socket.user?.email);
