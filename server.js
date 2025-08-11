@@ -26,8 +26,8 @@ dotenv.config();
 // Environment Variables:
 // - NODE_ENV: Set to 'development' for verbose logging, 'production' for minimal logging
 // - JWT_SECRET: Secret key for JWT token verification (required for production)
-// - WORXSTREAM_API_URL: URL of worXstream API for token verification (optional)
-// - WORXSTREAM_API_TOKEN: API token for worXstream API calls (optional)
+// - WORXSTREAM_API_URL: URL of worXstream API for user verification (optional)
+// - WORXSTREAM_API_TOKEN: API token for worXstream API calls (required for production user verification)
 
 const app = express();
 const httpServer = createServer(app);
@@ -211,24 +211,34 @@ io.use(async (socket, next) => {
     } catch (error) {
       console.error('❌ Token verification failed:', error.message);
       
-      // FALLBACK: Use user info from query parameters if token verification fails
-      // This is for cases where the frontend has a different token format (like Laravel)
+      // FALLBACK: Verify user ID with Laravel backend instead of exposing tokens
       const worxstreamUserId = socket.handshake.query?.worxstreamUserId;
       const userEmail = socket.handshake.query?.userEmail;
       
       if (worxstreamUserId && userEmail) {
-        console.log('⚠️ Using fallback authentication with query parameters');
-        console.log('🔍 Fallback user info:', { id: worxstreamUserId, email: userEmail });
+        console.log('⚠️ Using secure fallback: Verifying user with Laravel backend');
         
-        // Validate the user info
-        if (worxstreamUserId && userEmail) {
-          socket.user = {
-            id: worxstreamUserId,
-            email: userEmail
-          };
-          socket.token = token;
-          console.log('✅ Fallback authentication successful for:', userEmail);
-          next();
+        try {
+          // Verify user ID with Laravel backend (SECURE)
+          const userVerified = await verifyUserWithLaravel(worxstreamUserId, userEmail);
+          
+          if (userVerified) {
+            socket.user = {
+              id: worxstreamUserId,
+              email: userEmail
+            };
+            socket.token = 'verified'; // Don't store the actual Laravel token
+            console.log('✅ Secure fallback authentication successful for:', userEmail);
+            next();
+            return;
+          } else {
+            console.log('❌ User verification with Laravel failed');
+            next(new Error('Authentication failed: User verification failed'));
+            return;
+          }
+        } catch (verifyError) {
+          console.error('❌ Laravel verification error:', verifyError.message);
+          next(new Error('Authentication failed: Verification service unavailable'));
           return;
         }
       }
@@ -253,6 +263,42 @@ io.engine.on('initial_headers', (headers, req) => {
     headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
   }
 });
+
+// Secure user verification with Laravel backend
+async function verifyUserWithLaravel(userId, userEmail) {
+  try {
+    // If Laravel API is configured, verify with it
+    if (process.env.WORXSTREAM_API_URL && process.env.WORXSTREAM_API_TOKEN) {
+      const axios = await import('axios');
+      const response = await axios.default.get(`${process.env.WORXSTREAM_API_URL}/api/verify-user`, {
+        headers: {
+          'Authorization': `Bearer ${process.env.WORXSTREAM_API_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        params: {
+          userId: userId,
+          email: userEmail
+        },
+        timeout: 5000
+      });
+      
+      return response.data?.verified === true;
+    }
+    
+    // Fallback: Basic validation (less secure, but works without external API)
+    if (process.env.NODE_ENV === 'development') {
+      console.log('⚠️ DEVELOPMENT MODE: Using basic user validation');
+      return userId && userEmail && userEmail.includes('@');
+    }
+    
+    // Production: Require external verification
+    console.log('❌ No external verification configured for production');
+    return false;
+  } catch (error) {
+    console.error('❌ Laravel verification failed:', error.message);
+    return false;
+  }
+}
 
 // JWT token verification function
 async function verifyAndExtractUserInfo(token) {
