@@ -3,7 +3,7 @@ import emailService from './emailService.js';
 import enrichmentQueueService from './enrichmentQueueService.js';
 import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
-import { analyzeEmail, analyzeEmailBatch } from './claudeApiService.js';
+import { makeClaudeApiCall } from './claudeApiService.js';
 
 class EmailEnrichmentService {
   constructor() {
@@ -446,8 +446,8 @@ Format the response as a JSON object with these fields:
       
       for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
-          // Use the centralized API service for analysis
-          const analysis = await analyzeEmail(message);
+          // Use the custom prompt with user's categories instead of generic analyzeEmail
+          const analysis = await this.makeCustomAnalysisCall(message, prompt);
           return analysis;
         } catch (error) {
           // If this is the last attempt, throw the error
@@ -467,14 +467,82 @@ Format the response as a JSON object with these fields:
     }
   }
 
+  async makeCustomAnalysisCall(message, prompt) {
+    try {
+      console.log('🔍 makeCustomAnalysisCall - Using custom prompt for user categories');
+      
+      const response = await makeClaudeApiCall(prompt);
+      
+      try {
+        const analysis = JSON.parse(response);
+        return {
+          summary: analysis.summary || 'No summary available',
+          category: analysis.category || 'other',
+          priority: analysis.priority || 'medium',
+          sentiment: analysis.sentiment || 'neutral',
+          actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
+          enrichedAt: new Date().toISOString(),
+          version: '1.0',
+          error: null
+        };
+      } catch (parseError) {
+        console.error('❌ Failed to parse Claude response:', response);
+        
+        // Try to fix common JSON issues
+        try {
+          // Remove any leading/trailing text that's not JSON
+          let cleanedResponse = response.trim();
+          
+          // Find the first { and last } to extract just the JSON part
+          const firstBrace = cleanedResponse.indexOf('{');
+          const lastBrace = cleanedResponse.lastIndexOf('}');
+          
+          if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+            cleanedResponse = cleanedResponse.substring(firstBrace, lastBrace + 1);
+          }
+          
+          console.log('🔧 Attempting to parse cleaned response:', cleanedResponse);
+          const analysis = JSON.parse(cleanedResponse);
+          
+          return {
+            summary: analysis.summary || 'No summary available',
+            category: analysis.category || 'other',
+            priority: analysis.priority || 'medium',
+            sentiment: analysis.sentiment || 'neutral',
+            actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
+            enrichedAt: new Date().toISOString(),
+            version: '1.0',
+            error: null
+          };
+        } catch (secondParseError) {
+          console.error('❌ Failed to parse even after cleaning:', secondParseError.message);
+          
+          // Return a fallback analysis
+          return {
+            summary: 'Analysis failed - could not parse response',
+            category: 'other',
+            priority: 'medium',
+            sentiment: 'neutral',
+            actionItems: [],
+            enrichedAt: new Date().toISOString(),
+            version: '1.0',
+            error: 'Failed to parse Claude response: ' + parseError.message
+          };
+        }
+      }
+    } catch (error) {
+      console.error('❌ Custom analysis call failed:', error);
+      throw error;
+    }
+  }
+
   async generateBatchAnalysis(messages) {
     try {
       console.log('🔍 generateBatchAnalysis - Processing batch of', messages.length, 'emails');
       
-      // Use the centralized API service for batch analysis
-      const analyses = await analyzeEmailBatch(messages);
-      
-      return analyses;
+      // For batch analysis, we'll need to implement custom logic for each user's categories
+      // For now, fall back to the generic service
+      throw new Error('Custom batch analysis not yet implemented - use single email enrichment');
     } catch (error) {
       console.error('❌ AI batch analysis failed:', error);
       throw new Error('Failed to generate AI batch analysis: ' + error.message);

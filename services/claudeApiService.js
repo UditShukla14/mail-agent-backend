@@ -273,6 +273,9 @@ Please respond with only the JSON array, no additional text.`;
   }
 }
 
+// Export the makeClaudeApiCall function for use in other services
+export { makeClaudeApiCall };
+
 // Get current rate limit status
 export function getRateLimitStatus() {
   return {

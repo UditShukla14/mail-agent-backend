@@ -321,29 +321,29 @@ export const getEmailAnalytics = async (req, res) => {
 
         // Merge categories from EmailAccount with actual email counts
     const categories = allCategories.map(category => {
-      // Match email category by the label (user-facing text) since emails store the label value
-      let emailCategory = emailCategories.find(ec => ec._id === category.label);
+      // Use name for backend filtering as intended - emails should store the name value
+      let emailCategory = emailCategories.find(ec => ec._id === category.name);
       
       if (!emailCategory) {
-        // Try case-insensitive match on label
+        // Try case-insensitive match on name
         emailCategory = emailCategories.find(ec => 
-          ec._id.toLowerCase() === category.label.toLowerCase()
+          ec._id.toLowerCase() === category.name.toLowerCase()
         );
       }
       
       if (!emailCategory) {
         // Try normalized match (handle spaces, underscores, case differences)
-        const normalizedLabel = category.label.toLowerCase().replace(/[_\s]/g, '');
+        const normalizedName = category.name.toLowerCase().replace(/[_\s]/g, '');
         emailCategory = emailCategories.find(ec => {
           const normalizedEmailCategory = ec._id.toLowerCase().replace(/[_\s]/g, '');
-          return normalizedEmailCategory === normalizedLabel;
+          return normalizedEmailCategory === normalizedName;
         });
       }
       
       if (emailCategory) {
-        console.log(`🔍 Analytics: Category "${category.name}" (label: "${category.label}") matched: "${emailCategory._id}" -> "${category.label}"`);
+        console.log(`🔍 Analytics: Category "${category.name}" matched: "${emailCategory._id}" -> "${category.name}"`);
       } else {
-        console.log(`🔍 Analytics: Category "${category.name}" (label: "${category.label}") - No matching emails found`);
+        console.log(`🔍 Analytics: Category "${category.name}" - No matching emails found (emails may be storing label instead of name)`);
       }
       
       return {
