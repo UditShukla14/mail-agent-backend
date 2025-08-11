@@ -303,6 +303,15 @@ export const getEmailAnalytics = async (req, res) => {
     // Debug: Check what emails exist for this account
     const accountEmails = await Email.find(baseMatchCriteria).limit(3).select('email aiMeta.category');
     console.log(`🔍 Analytics: Sample account emails:`, accountEmails.map(e => ({ email: e.email, category: e.aiMeta?.category })));
+    
+    // Debug: Check ALL emails for this account to see which one is missing
+    const allAccountEmails = await Email.find(baseMatchCriteria).select('id email aiMeta.category aiMeta.enrichedAt');
+    console.log(`🔍 Analytics: ALL emails for account:`, allAccountEmails.map(e => ({ 
+      id: e.id, 
+      email: e.email, 
+      category: e.aiMeta?.category,
+      enrichedAt: e.aiMeta?.enrichedAt
+    })));
 
     const emailCategories = await Email.aggregate([
       { 

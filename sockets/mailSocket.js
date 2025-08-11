@@ -613,6 +613,14 @@ export const initMailSocket = (socket, io) => {
         aiMeta: updatedEmail.aiMeta 
       });
 
+      // Emit analytics refresh event to update dashboard widgets
+      socket.emit('mail:analyticsRefresh', {
+        messageId,
+        category,
+        email: email,
+        timestamp: new Date().toISOString()
+      });
+
     } catch (error) {
       console.error('❌ Error updating category:', error);
       socket.emit('mail:error', 'Failed to update category: ' + error.message);
