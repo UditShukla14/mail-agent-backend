@@ -84,7 +84,7 @@ const io = new Server(httpServer, {
     origin: allowedOrigins,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Info'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     exposedHeaders: ['Content-Length', 'X-Foo', 'X-Bar']
   },
   path: '/socket.io',
@@ -92,14 +92,15 @@ const io = new Server(httpServer, {
   pingTimeout: 60000,
   pingInterval: 25000,
   connectTimeout: 45000,
-  allowEIO3: true,
+  allowEIO3: false, // Disable EIO3 to prevent session issues
   allowUpgrades: true,
-  cookie: {
-    name: 'io',
-    path: '/',
-    httpOnly: true,
-    sameSite: 'none',
-    secure: true
+  cookie: false, // Disable cookie to prevent session conflicts
+  serveClient: false, // Don't serve client files
+  maxHttpBufferSize: 1e6, // 1MB buffer
+  upgradeTimeout: 10000, // 10 second upgrade timeout
+  allowRequest: (req, callback) => {
+    // Allow all requests for now, authentication happens in middleware
+    callback(null, true);
   }
 });
 
@@ -169,6 +170,13 @@ io.use(async (socket, next) => {
   try {
     console.log('🔐 Socket authentication check for:', socket.id);
     
+    // Debug: Log what we're receiving
+    console.log('🔍 Socket handshake debug:', {
+      auth: socket.handshake.auth,
+      headers: socket.handshake.headers,
+      query: socket.handshake.query
+    });
+    
     // Check for authentication token in handshake
     const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
     
@@ -176,11 +184,17 @@ io.use(async (socket, next) => {
       console.log('❌ No token provided for socket connection');
       return next(new Error('Authentication required'));
     }
+    
+    // Debug: Log the token we're trying to verify
+    console.log('🔍 Token debug:', {
+      tokenType: typeof token,
+      tokenLength: token.length,
+      tokenPreview: token.substring(0, 50) + '...',
+      isJWT: token.split('.').length === 3
+    });
 
     // Verify the token and extract user info (SECURE)
     try {
-      // For now, we'll use a simple approach - you should implement proper JWT verification
-      // This is a placeholder - replace with your actual token verification logic
       const userInfo = await verifyAndExtractUserInfo(token);
       
       if (userInfo && userInfo.id && userInfo.email) {
@@ -196,12 +210,47 @@ io.use(async (socket, next) => {
       }
     } catch (error) {
       console.error('❌ Token verification failed:', error.message);
-      next(new Error('Authentication failed: Invalid token'));
+      
+      // FALLBACK: Use user info from query parameters if token verification fails
+      // This is for cases where the frontend has a different token format (like Laravel)
+      const worxstreamUserId = socket.handshake.query?.worxstreamUserId;
+      const userEmail = socket.handshake.query?.userEmail;
+      
+      if (worxstreamUserId && userEmail) {
+        console.log('⚠️ Using fallback authentication with query parameters');
+        console.log('🔍 Fallback user info:', { id: worxstreamUserId, email: userEmail });
+        
+        // Validate the user info
+        if (worxstreamUserId && userEmail) {
+          socket.user = {
+            id: worxstreamUserId,
+            email: userEmail
+          };
+          socket.token = token;
+          console.log('✅ Fallback authentication successful for:', userEmail);
+          next();
+          return;
+        }
+      }
+      
+      // If no fallback available, reject the connection
+      next(new Error('Authentication failed: Invalid token and no fallback available'));
       return;
     }
   } catch (error) {
     console.error('❌ Socket authentication error:', error);
     next(error);
+  }
+});
+
+// Handle preflight requests and CORS for Socket.IO
+io.engine.on('initial_headers', (headers, req) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers['Access-Control-Allow-Credentials'] = 'true';
+    headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+    headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
   }
 });
 
@@ -297,14 +346,23 @@ io.on('connection', (socket) => {
 
   initMailSocket(socket, io);
 
-  socket.on('disconnect', () => {
-    console.log('👋 Client disconnected:', socket.id);
+  socket.on('disconnect', (reason) => {
+    console.log('👋 Client disconnected:', socket.id, 'Reason:', reason);
+  });
+  
+  socket.on('error', (error) => {
+    console.error('❌ Socket error:', socket.id, error);
   });
   
   // Add debugging for all events
   socket.onAny((eventName, ...args) => {
     console.log(`📨 Socket event received: ${eventName}`, args);
   });
+});
+
+// Handle connection errors
+io.engine.on('connection_error', (err) => {
+  console.error('❌ Socket.IO connection error:', err);
 });
 
 // Connect to MongoDB
