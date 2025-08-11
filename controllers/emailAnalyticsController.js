@@ -257,43 +257,22 @@ export const getEmailAnalytics = async (req, res) => {
     ]);
 
     // Get categories distribution for this specific email and folder
-    // Get ALL categories from ALL email accounts for this user to show comprehensive data
-    const allEmailAccounts = await EmailAccount.find({ userId: user._id });
-    const allCategories = [];
+    // Get categories from the currently active email account (like priority and sentiment)
+    const activeEmail = targetEmail || userEmails[0];
+    const emailAccount = await EmailAccount.findOne({ userId: user._id, email: activeEmail });
+    const allCategories = emailAccount?.categories || [];
     
-    // Collect unique categories from all accounts
-    const categoryMap = new Map();
-    allEmailAccounts.forEach(account => {
-      if (account.categories && account.categories.length > 0) {
-        account.categories.forEach(category => {
-          if (!categoryMap.has(category.name)) {
-            categoryMap.set(category.name, {
-              name: category.name,
-              label: category.label,
-              color: category.color,
-              description: category.description
-            });
-          }
-        });
-      }
-    });
-    
-    // Convert map to array
-    allCategories.push(...categoryMap.values());
-    
-    console.log(`🔍 Analytics: Found ${allCategories.length} unique categories across all accounts`);
+    console.log(`🔍 Analytics: Active account: ${activeEmail}`);
+    console.log(`🔍 Analytics: Found ${allCategories.length} categories for active account`);
     console.log(`🔍 Analytics: Categories:`, allCategories.map(c => c.name));
     
-    // Get actual email counts for each category across ALL accounts (not just the specific email)
-    const categoriesMatchCriteria = { 
-      userId: user._id, // Only filter by user, not by specific email
-      'aiMeta.category': { $exists: true, $ne: null }
-    };
+    console.log(`🔍 Analytics: Base match criteria:`, baseMatchCriteria);
+    console.log(`🔍 Analytics: User emails:`, userEmails);
+    console.log(`🔍 Analytics: Target email:`, targetEmail);
     
-    // Add folder filter if specified
-    if (folderId && folderId !== 'all' && folderId !== 'Inbox') {
-      categoriesMatchCriteria.folder = folderId;
-    }
+    // Get actual email counts for each category for THIS specific account
+    const categoriesMatchCriteria = { ...baseMatchCriteria };
+    categoriesMatchCriteria['aiMeta.category'] = { $exists: true, $ne: null };
     
     console.log(`🔍 Analytics: Category match criteria:`, categoriesMatchCriteria);
 
@@ -309,6 +288,21 @@ export const getEmailAnalytics = async (req, res) => {
         }
       }
     ]);
+    
+    console.log(`🔍 Analytics: Actual categories in DB:`, actualCategoriesInDB);
+    
+    // Debug: Check if emails have aiMeta.category field
+    const emailsWithCategory = await Email.countDocuments(categoriesMatchCriteria);
+    const totalEmails = await Email.countDocuments(baseMatchCriteria);
+    console.log(`🔍 Analytics: Emails with category field: ${emailsWithCategory}/${totalEmails}`);
+    
+    // Debug: Sample emails to see what's in aiMeta.category
+    const sampleEmails = await Email.find(categoriesMatchCriteria).limit(5).select('aiMeta.category');
+    console.log(`🔍 Analytics: Sample emails with categories:`, sampleEmails.map(e => e.aiMeta?.category));
+    
+    // Debug: Check what emails exist for this account
+    const accountEmails = await Email.find(baseMatchCriteria).limit(3).select('email aiMeta.category');
+    console.log(`🔍 Analytics: Sample account emails:`, accountEmails.map(e => ({ email: e.email, category: e.aiMeta?.category })));
 
     const emailCategories = await Email.aggregate([
       { 
@@ -325,15 +319,13 @@ export const getEmailAnalytics = async (req, res) => {
     
     console.log(`🔍 Analytics: Email categories aggregation result:`, emailCategories);
 
-    // Merge categories from EmailAccount with actual email counts
+        // Merge categories from EmailAccount with actual email counts
     const categories = allCategories.map(category => {
-      // Try exact match first, then case-insensitive match
-      let emailCategory = emailCategories.find(ec => ec._id === category.name);
-      if (!emailCategory) {
-        emailCategory = emailCategories.find(ec => 
-          ec._id.toLowerCase() === category.name.toLowerCase()
-        );
-      }
+      // Find matching email category by exact name match
+      const emailCategory = emailCategories.find(ec => ec._id === category.name);
+      
+      console.log(`🔍 Analytics: Category "${category.name}" - Found email category:`, emailCategory);
+      
       return {
         name: category.name,
         label: category.label,
@@ -344,28 +336,14 @@ export const getEmailAnalytics = async (req, res) => {
     });
     
     console.log(`🔍 Analytics: Final merged categories:`, categories.map(c => ({ name: c.name, value: c.value, unreadCount: c.unreadCount })));
-
-    // Add a catch-all category for emails that have category data but don't match EmailAccount categories
-    const matchedCategoryNames = emailCategories.map(ec => ec._id);
-    const unmatchedCategories = actualCategoriesInDB.filter(ac => !matchedCategoryNames.includes(ac._id));
     
-    if (unmatchedCategories.length > 0) {
-      const unmatchedTotal = unmatchedCategories.reduce((sum, cat) => sum + cat.count, 0);
-      categories.push({
-        name: 'unmatched',
-        label: 'Other Categories',
-        color: '#BDBDBD',
-        value: unmatchedTotal,
-        unreadCount: 0 // We don't have unread count for unmatched categories
-      });
-    }
+    // Since emails can only have categories from EmailAccount, we don't need to add unmatched categories
+    // All categories should be properly matched above
 
-    // Special handling for 'work' category - map it to 'product_technical' if it exists
-    const workCategory = categories.find(cat => cat.name === 'product_technical');
-    const workEmails = actualCategoriesInDB.find(ac => ac._id === 'work');
-    if (workEmails && workCategory) {
-      workCategory.value += workEmails.count;
-    }
+    // Note: Custom categories are now handled automatically above
+    // No need for special category mapping since we show all categories that exist in emails
+    
+    console.log(`🔍 Analytics: Final categories after adding custom ones:`, categories.map(c => ({ name: c.name, value: c.value })));
 
     // Get sentiment analysis for this specific email and folder
     const sentimentMatchCriteria = { ...baseMatchCriteria };
