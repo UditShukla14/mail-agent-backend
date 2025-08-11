@@ -257,18 +257,50 @@ export const getEmailAnalytics = async (req, res) => {
     ]);
 
     // Get categories distribution for this specific email and folder
-    // First, get all categories from the user's email account
-    const emailAccount = await EmailAccount.findOne({ userId: user._id, email: userEmails[0] });
-    const allCategories = emailAccount?.categories || [];
+    // Get ALL categories from ALL email accounts for this user to show comprehensive data
+    const allEmailAccounts = await EmailAccount.find({ userId: user._id });
+    const allCategories = [];
     
-    // Get actual email counts for each category
-    const categoriesMatchCriteria = { ...baseMatchCriteria };
-    categoriesMatchCriteria['aiMeta.category'] = { $exists: true, $ne: null };
+    // Collect unique categories from all accounts
+    const categoryMap = new Map();
+    allEmailAccounts.forEach(account => {
+      if (account.categories && account.categories.length > 0) {
+        account.categories.forEach(category => {
+          if (!categoryMap.has(category.name)) {
+            categoryMap.set(category.name, {
+              name: category.name,
+              label: category.label,
+              color: category.color,
+              description: category.description
+            });
+          }
+        });
+      }
+    });
+    
+    // Convert map to array
+    allCategories.push(...categoryMap.values());
+    
+    console.log(`🔍 Analytics: Found ${allCategories.length} unique categories across all accounts`);
+    console.log(`🔍 Analytics: Categories:`, allCategories.map(c => c.name));
+    
+    // Get actual email counts for each category across ALL accounts (not just the specific email)
+    const categoriesMatchCriteria = { 
+      userId: user._id, // Only filter by user, not by specific email
+      'aiMeta.category': { $exists: true, $ne: null }
+    };
+    
+    // Add folder filter if specified
+    if (folderId && folderId !== 'all' && folderId !== 'Inbox') {
+      categoriesMatchCriteria.folder = folderId;
+    }
+    
+    console.log(`🔍 Analytics: Category match criteria:`, categoriesMatchCriteria);
 
     // Get actual email counts for each category
     const actualCategoriesInDB = await Email.aggregate([
       { 
-        $match: { ...baseMatchCriteria, 'aiMeta.category': { $exists: true, $ne: null } }
+        $match: categoriesMatchCriteria
       },
       {
         $group: {
@@ -290,6 +322,8 @@ export const getEmailAnalytics = async (req, res) => {
         }
       }
     ]);
+    
+    console.log(`🔍 Analytics: Email categories aggregation result:`, emailCategories);
 
     // Merge categories from EmailAccount with actual email counts
     const categories = allCategories.map(category => {
@@ -308,6 +342,8 @@ export const getEmailAnalytics = async (req, res) => {
         unreadCount: emailCategory ? emailCategory.unreadCount : 0
       };
     });
+    
+    console.log(`🔍 Analytics: Final merged categories:`, categories.map(c => ({ name: c.name, value: c.value, unreadCount: c.unreadCount })));
 
     // Add a catch-all category for emails that have category data but don't match EmailAccount categories
     const matchedCategoryNames = emailCategories.map(ec => ec._id);
