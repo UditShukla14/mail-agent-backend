@@ -124,11 +124,14 @@ export const initMailSocket = (socket, io) => {
   });
 
   // New handler for enriching specific emails
-  socket.on('mail:enrichEmails', async ({ worxstreamUserId, email, messageIds }) => {
+  socket.on('mail:enrichEmails', async ({ worxstreamUserId, email, messageIds, forceReanalyze = false }) => {
     try {
-      console.log('🔍 Enrichment request received:', { worxstreamUserId, email, messageIds: messageIds.length });
-      
-      // Remove test events - they were causing confusion
+      console.log('🔍 Enrichment request received:', { 
+        worxstreamUserId, 
+        email, 
+        messageIds: messageIds.length, 
+        forceReanalyze 
+      });
       
       // Get the messages that need enrichment
       const messages = await Email.find({ id: { $in: messageIds } });
@@ -140,10 +143,27 @@ export const initMailSocket = (socket, io) => {
         return;
       }
 
-      // Filter out already enriched messages
-      const messagesNeedingEnrichment = messages.filter(msg => !msg.aiMeta?.enrichedAt);
+      let messagesNeedingEnrichment;
       
-      console.log('📧 Messages needing enrichment:', messagesNeedingEnrichment.length);
+      if (forceReanalyze) {
+        // Force re-enrichment: process all messages regardless of current AI metadata
+        console.log('🔄 Force re-enrichment requested - processing all messages');
+        messagesNeedingEnrichment = messages;
+        
+        // Clear existing AI metadata for force re-enrichment
+        await Email.updateMany(
+          { id: { $in: messageIds } },
+          { 
+            $unset: { aiMeta: 1 },
+            $set: { isProcessed: false, updatedAt: new Date() }
+          }
+        );
+        console.log('🧹 Cleared existing AI metadata for force re-enrichment');
+      } else {
+        // Normal enrichment: only process messages without AI metadata
+        messagesNeedingEnrichment = messages.filter(msg => !msg.aiMeta?.enrichedAt);
+        console.log('📧 Messages needing enrichment:', messagesNeedingEnrichment.length);
+      }
       
       if (messagesNeedingEnrichment.length > 0) {
         // Pass the socket instance directly to the enrichment queue service
@@ -301,11 +321,16 @@ export const initMailSocket = (socket, io) => {
 
       const validMessages = savedMessages.filter(Boolean);
 
-      // Emit messages immediately
+      // Emit messages immediately with database IDs
+      const messagesWithDbId = validMessages.map(msg => ({
+        ...msg.toObject(),
+        dbId: msg._id.toString() // Include the MongoDB ObjectId as dbId
+      }));
+      
       socket.emit('mail:folderMessages', {
         folderId,
         page,
-        messages: validMessages,
+        messages: messagesWithDbId,
         nextLink: newNextLink
       });
 

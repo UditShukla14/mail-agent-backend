@@ -187,18 +187,23 @@ class EmailService {
       const combinedMessage = {
         ...outlookMessage,
         content: processedContent, // Use processed content
-        aiMeta: aiMetadata // Include AI metadata if available
+        aiMeta: aiMetadata, // Include AI metadata if available
+        dbId: dbMessage?._id?.toString() // Include database ID for short URLs
       };
 
       // If message doesn't exist in DB, save it with AI metadata
       if (!dbMessage) {
         console.log(`💾 Saving new message ${messageId} to database`);
-        await Email.create({
+        const savedMessage = await Email.create({
           ...outlookMessage,
           userId: user._id,
           email: email,
           isProcessed: false
         });
+        
+        // Update the combined message with the new database ID
+        combinedMessage.dbId = savedMessage._id.toString();
+        console.log(`💾 New message saved with database ID: ${combinedMessage.dbId}`);
       }
 
       console.log(`✅ Returning combined message with ${aiMetadata ? 'AI metadata' : 'no AI metadata'} and ${outlookMessage.attachments?.length || 0} attachments`);
