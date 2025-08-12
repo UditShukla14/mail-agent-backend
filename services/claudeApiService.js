@@ -238,6 +238,8 @@ export async function analyzeEmailBatch(emails) {
   "actionItems": ["List of action items from the email"]
 }
 
+IMPORTANT: The category field must be exactly one of the internal category names listed above (e.g., "urgent_high_priority", not "Urgent & High Priority"). Use the exact internal name, not the display label.
+
 Emails:
 ${emails.map((email, index) => `
 Email ${index + 1}:
@@ -257,16 +259,37 @@ Please respond with only the JSON array, no additional text.`;
       throw new Error('Response is not an array');
     }
     
-    return analyses.map((analysis, index) => ({
-      summary: analysis.summary || 'No summary available',
-      category: analysis.category || 'other',
-      priority: analysis.priority || 'medium',
-      sentiment: analysis.sentiment || 'neutral',
-      actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
-      enrichedAt: new Date().toISOString(),
-      version: '1.0',
-      error: null
-    }));
+    // Valid internal category names
+    const validCategories = [
+      'urgent_high_priority', 'revenue_impacting', 'customer_sales_ops', 
+      'growth_strategy', 'team_leadership', 'product_technical', 
+      'legal_compliance', 'time_sensitive_calendar', 'newsletters_subscriptions', 
+      'vendors_tools', 'reports_kpis', 'personal_internal_casual', 
+      'archive_low_relevance', 'other'
+    ];
+
+    return analyses.map((analysis, index) => {
+      // Validate and normalize category to ensure it's a valid internal name
+      let normalizedCategory = analysis.category || 'other';
+      
+      // If the AI returned a label instead of name, try to find the matching name
+      if (!validCategories.includes(normalizedCategory)) {
+        // This is a fallback - ideally the AI should return the correct name
+        console.warn(`⚠️ AI returned invalid category: "${normalizedCategory}" for email ${index + 1}, defaulting to "other"`);
+        normalizedCategory = 'other';
+      }
+
+      return {
+        summary: analysis.summary || 'No summary available',
+        category: normalizedCategory,
+        priority: analysis.priority || 'medium',
+        sentiment: analysis.sentiment || 'neutral',
+        actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
+        enrichedAt: new Date().toISOString(),
+        version: '1.0',
+        error: null
+      };
+    });
   } catch (parseError) {
     console.error('❌ Failed to parse Claude batch response:', response);
     throw new Error('Failed to parse Claude response as JSON array: ' + parseError.message);

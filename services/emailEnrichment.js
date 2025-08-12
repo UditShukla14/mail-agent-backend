@@ -64,10 +64,29 @@ class EmailEnrichmentService {
       // Generate AI analysis
       const analysis = await this.generateAnalysis(email);
       
+      // Validate and normalize category to ensure it's a valid internal name
+      let normalizedCategory = analysis.category || 'Other';
+      
+      // Get the valid categories from the email account to validate against
+      const emailAccount = await EmailAccount.findOne({ 
+        userId: email.userId, 
+        email: email.email 
+      });
+      
+      if (emailAccount && emailAccount.categories) {
+        const validCategories = emailAccount.categories.map(cat => cat.name);
+        
+        // If the AI returned a label instead of name, try to find the matching name
+        if (!validCategories.includes(normalizedCategory)) {
+          console.warn(`⚠️ AI returned invalid category: "${normalizedCategory}" for email ${email.id}, defaulting to "Other"`);
+          normalizedCategory = 'Other';
+        }
+      }
+      
       // Remove fallback values if they don't exist
       const cleanedAnalysis = {
         summary: analysis.summary || 'No summary available',
-        category: analysis.category || 'Other',
+        category: normalizedCategory,
         priority: analysis.priority || 'medium',
         sentiment: analysis.sentiment || 'neutral',
         actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
@@ -426,10 +445,12 @@ ${categoryInfo}
 
 Please provide:
 1. A brief summary (2-3 sentences)
-2. The category (must be one of: ${categoryNames})
+2. The category (must be exactly one of: ${categoryNames})
 3. Priority level (urgent, high, medium, low)
 4. Sentiment (positive, negative, neutral)
 5. Key action items or next steps (if any)
+
+IMPORTANT: The category field must be exactly one of the internal category names listed above (e.g., "urgent_high_priority", not "Urgent & High Priority"). Use the exact internal name, not the display label.
 
 Format the response as a JSON object with these fields:
 {
@@ -475,9 +496,32 @@ Format the response as a JSON object with these fields:
       
       try {
         const analysis = JSON.parse(response);
+        
+        // Validate and normalize category to ensure it's a valid internal name
+        let normalizedCategory = analysis.category || 'other';
+        
+        // Get the valid categories from the email account to validate against
+        const user = await User.findById(message.userId);
+        if (user) {
+          const emailAccount = await EmailAccount.findOne({ 
+            userId: user._id, 
+            email: message.email 
+          });
+          
+          if (emailAccount && emailAccount.categories) {
+            const validCategories = emailAccount.categories.map(cat => cat.name);
+            
+            // If the AI returned a label instead of name, try to find the matching name
+            if (!validCategories.includes(normalizedCategory)) {
+              console.warn(`⚠️ AI returned invalid category: "${normalizedCategory}" for email ${message.id}, defaulting to "other"`);
+              normalizedCategory = 'other';
+            }
+          }
+        }
+        
         return {
           summary: analysis.summary || 'No summary available',
-          category: analysis.category || 'other',
+          category: normalizedCategory,
           priority: analysis.priority || 'medium',
           sentiment: analysis.sentiment || 'neutral',
           actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],

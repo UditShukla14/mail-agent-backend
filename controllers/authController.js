@@ -38,7 +38,12 @@ export const outlookLogin = async (req, res) => {
       'offline_access',
       'User.Read',
       'Mail.ReadWrite',
-      'Mail.Send'
+      'Mail.Send',
+      'Calendars.Read',
+      'Calendars.Read.Shared',
+      'Calendars.ReadBasic',
+      'Calendars.ReadWrite',
+      'Calendars.ReadWrite.Shared'
     ].join(' ');
 
     const statePayload = Buffer.from(JSON.stringify({ worxstreamUserId, callbackUrl })).toString('base64');
@@ -208,7 +213,10 @@ export const gmailLogin = async (req, res) => {
       'https://www.googleapis.com/auth/gmail.send',
       'https://www.googleapis.com/auth/gmail.modify',
       'https://www.googleapis.com/auth/userinfo.email',
-      'https://www.googleapis.com/auth/userinfo.profile'
+      'https://www.googleapis.com/auth/userinfo.profile',
+      'https://www.googleapis.com/auth/calendar.readonly',
+      'https://www.googleapis.com/auth/calendar.events.readonly',
+      'https://www.googleapis.com/auth/calendar.events'
     ];
 
     const statePayload = Buffer.from(JSON.stringify({ worxstreamUserId, callbackUrl })).toString('base64');
