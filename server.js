@@ -255,6 +255,17 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('👋 Client disconnected:', socket.id);
+    
+    // Clean up user-specific data
+    if (socket.worxstreamUserId) {
+      console.log(`🧹 Cleaning up socket data for user: ${socket.worxstreamUserId}`);
+      // Remove from enrichment service
+      try {
+        emailEnrichmentService.unregisterSocket(socket);
+      } catch (error) {
+        console.log('⚠️ Error unregistering socket from enrichment service:', error.message);
+      }
+    }
   });
   
   // Add debugging for all events

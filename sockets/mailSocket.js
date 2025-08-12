@@ -65,6 +65,20 @@ export const initMailSocket = (socket, io) => {
     try {
       console.log('📧 Mail initialization for:', { worxstreamUserId, email });
       
+      // Check if this user already has an active socket for this email
+      const userSockets = Array.from(io.sockets.sockets.values()).filter(s => 
+        s.worxstreamUserId === worxstreamUserId && s.id !== socket.id
+      );
+      
+      if (userSockets.length > 0) {
+        console.log(`🔄 User ${worxstreamUserId} already has ${userSockets.length} active socket(s), skipping duplicate initialization`);
+        // Clean up old sockets
+        userSockets.forEach(oldSocket => {
+          console.log(`🧹 Cleaning up old socket: ${oldSocket.id}`);
+          oldSocket.disconnect();
+        });
+      }
+      
       // Store worxstreamUserId on socket for later use
       socket.worxstreamUserId = worxstreamUserId;
     
@@ -114,32 +128,7 @@ export const initMailSocket = (socket, io) => {
     try {
       console.log('🔍 Enrichment request received:', { worxstreamUserId, email, messageIds: messageIds.length });
       
-      // Send a test event immediately to verify socket communication
-      socket.emit('mail:enrichmentStatus', {
-        messageId: 'test-message-id',
-        status: 'analyzing',
-        message: 'Testing socket communication...'
-      });
-      console.log('📤 Sent test enrichment status event');
-      
-      // Send another test event after a short delay to verify ongoing communication
-      setTimeout(() => {
-        socket.emit('mail:enrichmentStatus', {
-          messageId: 'test-message-id-2',
-          status: 'completed',
-          message: 'Test communication successful!',
-          aiMeta: {
-            summary: 'This is a test summary',
-            category: 'test',
-            priority: 'medium',
-            sentiment: 'neutral',
-            actionItems: [],
-            enrichedAt: new Date().toISOString(),
-            version: '1.0'
-          }
-        });
-        console.log('📤 Sent second test enrichment status event');
-      }, 2000);
+      // Remove test events - they were causing confusion
       
       // Get the messages that need enrichment
       const messages = await Email.find({ id: { $in: messageIds } });
