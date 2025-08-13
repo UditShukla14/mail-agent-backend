@@ -209,34 +209,43 @@ export const getEmailAnalytics = async (req, res) => {
 
     // If no enriched emails, trigger enrichment for all unenriched emails for this email and folder
     if (enrichedCount === 0) {
-      const unenrichedMatchCriteria = { 
-        userId: user._id,
-        $or: [
-          { 'aiMeta.enrichedAt': { $exists: false } },
-          { 'aiMeta.enrichedAt': null }
-        ]
-      };
+      // Check if user has categories configured before triggering enrichment
+      const activeEmail = targetEmail || userEmails[0];
+      const emailAccount = await EmailAccount.findOne({ userId: user._id, email: activeEmail });
       
-      // Add email filter only if targetEmail is specified
-      if (targetEmail) {
-        unenrichedMatchCriteria.email = targetEmail;
+      if (!emailAccount || !emailAccount.categories || emailAccount.categories.length === 0) {
+        console.log('⏸️ Skipping automatic enrichment - no categories configured for user');
       } else {
-        unenrichedMatchCriteria.email = { $in: userEmails };
-      }
-      
-      if (folderId) {
-        unenrichedMatchCriteria.folder = folderId;
-      }
+        const unenrichedMatchCriteria = { 
+          userId: user._id,
+          $or: [
+            { 'aiMeta.enrichedAt': { $exists: false } },
+            { 'aiMeta.enrichedAt': null }
+          ]
+        };
+        
+        // Add email filter only if targetEmail is specified
+        if (targetEmail) {
+          unenrichedMatchCriteria.email = targetEmail;
+        } else {
+          unenrichedMatchCriteria.email = { $in: userEmails };
+        }
+        
+        if (folderId) {
+          unenrichedMatchCriteria.folder = folderId;
+        }
 
-      const unenrichedEmails = await Email.find(unenrichedMatchCriteria);
+        const unenrichedEmails = await Email.find(unenrichedMatchCriteria);
 
-      if (unenrichedEmails.length > 0) {
-        try {
-          // Use the queue service instead of direct enrichment to prevent infinite loops
-          const enrichmentQueueService = await import('../services/enrichmentQueueService.js');
-          await enrichmentQueueService.default.addToQueue(unenrichedEmails);
-        } catch (enrichmentError) {
-          // Silently handle enrichment queue errors
+        if (unenrichedEmails.length > 0) {
+          try {
+            console.log(`🚀 Auto-triggering enrichment for ${unenrichedEmails.length} emails (${emailAccount.categories.length} categories available)`);
+            // Use the queue service instead of direct enrichment to prevent infinite loops
+            const enrichmentQueueService = await import('../services/enrichmentQueueService.js');
+            await enrichmentQueueService.default.addToQueue(unenrichedEmails);
+          } catch (enrichmentError) {
+            // Silently handle enrichment queue errors
+          }
         }
       }
     }

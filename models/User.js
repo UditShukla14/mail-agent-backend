@@ -17,6 +17,27 @@ const userSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true
+  },
+  // Additional fields for worXstream integration
+  emailVerifiedAt: {
+    type: Date,
+    default: null
+  },
+  status: {
+    type: String,
+    default: '1' // '1' for active, '0' for inactive
+  },
+  isAdmin: {
+    type: Boolean,
+    default: false
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
   }
 }, {
   timestamps: true

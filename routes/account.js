@@ -67,11 +67,11 @@ router.get('/accounts', authenticateUser, async (req, res) => {
         worxstreamUserId: worxstreamUserId,
         name: worxstreamUser.name,
         email: worxstreamUser.email,
-        email_verified_at: worxstreamUser.email_verified_at,
-        status: worxstreamUser.status,
-        is_admin: worxstreamUser.is_admin,
-        created_at: worxstreamUser.created_at,
-        updated_at: worxstreamUser.updated_at
+        emailVerifiedAt: worxstreamUser.email_verified_at ? new Date(worxstreamUser.email_verified_at) : null,
+        status: worxstreamUser.status || '1',
+        isAdmin: worxstreamUser.is_admin || false,
+        createdAt: worxstreamUser.created_at ? new Date(worxstreamUser.created_at) : new Date(),
+        updatedAt: worxstreamUser.updated_at ? new Date(worxstreamUser.updated_at) : new Date()
       });
       
       await user.save();
