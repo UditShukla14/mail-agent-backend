@@ -133,19 +133,30 @@ async function makeClaudeApiCall(prompt, retryCount = 0) {
 
 // Analyze a single email
 export async function analyzeEmail(email) {
-  const prompt = `Analyze this email and provide a JSON response with the following structure:
-{
-  "summary": "Brief summary of the email content",
-  "category": "One of: urgent_high_priority, revenue_impacting, customer_sales_ops, growth_strategy, team_leadership, product_technical, legal_compliance, time_sensitive_calendar, newsletters_subscriptions, vendors_tools, reports_kpis, personal_internal_casual, archive_low_relevance, other",
-  "priority": "One of: urgent, high, medium, low",
-  "sentiment": "One of: positive, negative, neutral",
-  "actionItems": ["List of action items from the email"]
-}
+  console.log(`🔍 Analyzing email: ${email.id}`);
+  
+  const prompt = `Analyze this email and provide insights:
 
-Email content:
+Email Details:
 From: ${email.from}
 Subject: ${email.subject}
 Content: ${email.content || email.preview}
+
+Please provide:
+1. A brief summary (2-3 sentences)
+2. The category (choose the most appropriate one based on content and sender)
+3. Priority level (urgent, high, medium, low)
+4. Sentiment (positive, negative, neutral)
+5. Key action items or next steps (if any)
+
+Format the response as a JSON object with these fields:
+{
+  "summary": "string",
+  "category": "string",
+  "priority": "string",
+  "sentiment": "string",
+  "actionItems": ["string"]
+}
 
 Please respond with only the JSON object, no additional text.`;
 
@@ -155,7 +166,7 @@ Please respond with only the JSON object, no additional text.`;
     const analysis = JSON.parse(response);
     return {
       summary: analysis.summary || 'No summary available',
-      category: analysis.category || 'other',
+      category: analysis.category,
       priority: analysis.priority || 'medium',
       sentiment: analysis.sentiment || 'neutral',
       actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
@@ -199,7 +210,7 @@ Please respond with only the JSON object, no additional text.`;
       
       return {
         summary: analysis.summary || 'No summary available',
-        category: analysis.category || 'other',
+        category: analysis.category,
         priority: analysis.priority || 'medium',
         sentiment: analysis.sentiment || 'neutral',
         actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
@@ -213,7 +224,7 @@ Please respond with only the JSON object, no additional text.`;
       // Return a fallback analysis
       return {
         summary: 'Analysis failed - could not parse response',
-        category: 'other',
+        category: null,
         priority: 'medium',
         sentiment: 'neutral',
         actionItems: [],
@@ -232,13 +243,11 @@ export async function analyzeEmailBatch(emails) {
   const batchPrompt = `Analyze these emails and provide a JSON array response. Each email should have the following structure:
 {
   "summary": "Brief summary of the email content",
-  "category": "One of: urgent_high_priority, revenue_impacting, customer_sales_ops, growth_strategy, team_leadership, product_technical, legal_compliance, time_sensitive_calendar, newsletters_subscriptions, vendors_tools, reports_kpis, personal_internal_casual, archive_low_relevance, other",
+  "category": "Choose the most appropriate category based on content and sender",
   "priority": "One of: urgent, high, medium, low",
   "sentiment": "One of: positive, negative, neutral",
   "actionItems": ["List of action items from the email"]
 }
-
-IMPORTANT: The category field must be exactly one of the internal category names listed above (e.g., "urgent_high_priority", not "Urgent & High Priority"). Use the exact internal name, not the display label.
 
 Emails:
 ${emails.map((email, index) => `
@@ -259,26 +268,11 @@ Please respond with only the JSON array, no additional text.`;
       throw new Error('Response is not an array');
     }
     
-    // Valid internal category names
-    const validCategories = [
-      'urgent_high_priority', 'revenue_impacting', 'customer_sales_ops', 
-      'growth_strategy', 'team_leadership', 'product_technical', 
-      'legal_compliance', 'time_sensitive_calendar', 'newsletters_subscriptions', 
-      'vendors_tools', 'reports_kpis', 'personal_internal_casual', 
-      'archive_low_relevance', 'other'
-    ];
-
     return analyses.map((analysis, index) => {
       // Validate and normalize category to ensure it's a valid internal name
-      let normalizedCategory = analysis.category || 'other';
+      let normalizedCategory = analysis.category;
       
-      // If the AI returned a label instead of name, try to find the matching name
-      if (!validCategories.includes(normalizedCategory)) {
-        // This is a fallback - ideally the AI should return the correct name
-        console.warn(`⚠️ AI returned invalid category: "${normalizedCategory}" for email ${index + 1}, defaulting to "other"`);
-        normalizedCategory = 'other';
-      }
-
+      // Return the analysis without hardcoded category validation
       return {
         summary: analysis.summary || 'No summary available',
         category: normalizedCategory,

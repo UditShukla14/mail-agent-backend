@@ -64,7 +64,7 @@ class CalendarService {
       
       // Get all the fields you need for complete event data
       const params = {
-        $select: 'subject,bodyPreview,organizer,attendees,start,end,location,id,isAllDay,recurrence,responseStatus,sensitivity',
+        $select: 'subject,body,bodyPreview,organizer,attendees,start,end,location,id,isAllDay,recurrence,responseStatus,sensitivity',
         $top: 1000
       };
       
@@ -239,6 +239,7 @@ class CalendarService {
       eventId: outlookEvent.id,
       title: outlookEvent.subject || 'No Title',
       description: outlookEvent.bodyPreview || '',
+      bodyContent: outlookEvent.body?.content || '',
       startTime: outlookEvent.start.dateTime || outlookEvent.start.date,
       endTime: outlookEvent.end.dateTime || outlookEvent.end.date,
       startTimeZone: outlookEvent.start.timeZone,

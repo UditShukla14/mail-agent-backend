@@ -1,4 +1,4 @@
-import { analyzeEmail } from './claudeApiService.js';
+import emailEnrichmentService from './emailEnrichment.js';
 import Email from '../models/email.js';
 
 // Configuration
@@ -28,20 +28,9 @@ async function processEmailWithRetry(email, retryCount = 0, emitCallback = null)
       console.log('📡 Socket not available for analyzing status, continuing with processing...');
     }
 
-    // Use the centralized API service for analysis
-    const analysis = await analyzeEmail(email);
-    
-    // ALWAYS save to database first - this is the critical part
-    const updatedEmail = await Email.findByIdAndUpdate(
-      email._id,
-      {
-        $set: {
-          aiMeta: analysis,
-          isProcessed: true
-        }
-      },
-      { new: true }
-    );
+    // Use our custom enrichment service with database categories instead of hardcoded ones
+    console.log(`🔍 Processing email ${email.id} with custom enrichment service`);
+    const updatedEmail = await emailEnrichmentService.enrichEmail(email, false);
     
     console.log(`✅ Email ${email.id} processed and saved to database successfully`);
     
@@ -53,7 +42,7 @@ async function processEmailWithRetry(email, retryCount = 0, emitCallback = null)
           messageId: email.id,
           status: 'completed',
           message: 'Email analysis completed',
-          aiMeta: analysis,
+          aiMeta: updatedEmail.aiMeta,
           email: updatedEmail
         });
         console.log(`✅ EmitCallback for completion status completed for email ${email.id}`);

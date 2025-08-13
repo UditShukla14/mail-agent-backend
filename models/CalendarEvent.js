@@ -19,6 +19,10 @@ const calendarEventSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  bodyContent: {
+    type: String,
+    default: ''
+  },
   startTime: {
     type: Date,
     required: true

@@ -65,7 +65,7 @@ class EmailEnrichmentService {
       const analysis = await this.generateAnalysis(email);
       
       // Validate and normalize category to ensure it's a valid internal name
-      let normalizedCategory = analysis.category || 'Other';
+      let normalizedCategory = analysis.category;
       
       // Get the valid categories from the email account to validate against
       const emailAccount = await EmailAccount.findOne({ 
@@ -75,11 +75,13 @@ class EmailEnrichmentService {
       
       if (emailAccount && emailAccount.categories) {
         const validCategories = emailAccount.categories.map(cat => cat.name);
+        const categoryDetails = emailAccount.categories.map(cat => `${cat.name} (${cat.label}): ${cat.description}`).join(', ');
         
-        // If the AI returned a label instead of name, try to find the matching name
+        // If the AI returned an invalid category, fail the enrichment
         if (!validCategories.includes(normalizedCategory)) {
-          console.warn(`⚠️ AI returned invalid category: "${normalizedCategory}" for email ${email.id}, defaulting to "Other"`);
-          normalizedCategory = 'Other';
+          console.error(`❌ AI returned invalid category: "${normalizedCategory}" for email ${email.id}. Valid categories: ${validCategories.join(', ')}`);
+          console.error(`📋 Category details: ${categoryDetails}`);
+          throw new Error(`AI returned invalid category: "${normalizedCategory}". Valid categories are: ${validCategories.join(', ')}. Please ensure the AI uses the exact internal name from the provided list.`);
         }
       }
       
@@ -126,7 +128,39 @@ class EmailEnrichmentService {
       return updatedEmail;
     } catch (error) {
       console.error('❌ Email enrichment failed:', error);
-      // Update email with error
+      
+      // Check if this is a "no categories" error
+      if (error.message.includes('No categories defined yet')) {
+        console.log('⏭️ Email enrichment skipped - user needs to create categories first');
+        
+        // Update email to indicate it's waiting for categories
+        await Email.findByIdAndUpdate(email._id, {
+          $set: {
+            'aiMeta.error': 'Waiting for user to create categories',
+            'aiMeta.enrichedAt': new Date().toISOString(),
+            'aiMeta.version': '1.0',
+            isProcessed: false
+          }
+        });
+        
+        // Emit status to user
+        const user = await User.findById(email.userId);
+        if (user) {
+          const userSocket = this.findUserSocket(user.worxstreamUserId);
+          if (userSocket) {
+            userSocket.emit('mail:enrichmentStatus', {
+              messageId: email.id,
+              status: 'waiting',
+              message: 'Please create email categories first to enable AI analysis'
+            });
+          }
+        }
+        
+        // Return the email without enrichment
+        return email;
+      }
+      
+      // Update email with error for other types of failures
       await Email.findByIdAndUpdate(email._id, {
         $set: {
           'aiMeta.error': error.message,
@@ -398,7 +432,10 @@ class EmailEnrichmentService {
         userId: message.userId,
         email: message.email,
         from: message.from,
-        to: message.to
+        to: message.to,
+        messageKeys: Object.keys(message),
+        messageEmailType: typeof message.email,
+        messageEmailValue: message.email
       });
       
       // Get user and email account for categories
@@ -407,26 +444,55 @@ class EmailEnrichmentService {
         throw new Error('User not found');
       }
 
+      console.log('🔍 generateAnalysis - User lookup:', {
+        messageUserId: message.userId,
+        foundUser: user._id,
+        worxstreamUserId: user.worxstreamUserId,
+        userEmail: user.email
+      });
+
       // Get email account for this specific email (use the user's email address)
       const emailAccount = await EmailAccount.findOne({ 
         userId: user._id, 
         email: message.email 
       });
 
+      // Debug: Check all email accounts for this user
+      const allUserAccounts = await EmailAccount.find({ userId: user._id });
+      console.log('🔍 generateAnalysis - All user email accounts:', {
+        totalAccounts: allUserAccounts.length,
+        accounts: allUserAccounts.map(acc => ({
+          email: acc.email,
+          hasCategories: !!acc.categories,
+          categoriesCount: acc.categories?.length || 0
+        }))
+      });
+
       console.log('🔍 generateAnalysis - Email account lookup:', {
         userId: user._id,
         email: message.email,
         found: !!emailAccount,
-        categoriesCount: emailAccount?.categories?.length || 0
+        categoriesCount: emailAccount?.categories?.length || 0,
+        categories: emailAccount?.categories?.map(cat => ({
+          name: cat.name,
+          label: cat.label,
+          description: cat.description
+        })) || []
       });
 
       if (!emailAccount) {
         throw new Error('Email account not found');
       }
 
+      // 🚨 CRITICAL FIX: Don't process if no categories defined
+      if (!emailAccount.categories || emailAccount.categories.length === 0) {
+        console.log('⏭️ Skipping enrichment - no categories defined yet for account:', message.email);
+        throw new Error('No categories defined yet. Please create categories first before processing emails.');
+      }
+
       // Create detailed category information for AI
       const categoryInfo = emailAccount.categories.map(cat => 
-        `- ${cat.name}: ${cat.description}`
+        `- ${cat.name} (${cat.label}): ${cat.description}`
       ).join('\n');
       
       const categoryNames = emailAccount.categories.map(c => c.name).join(', ');
@@ -450,7 +516,14 @@ Please provide:
 4. Sentiment (positive, negative, neutral)
 5. Key action items or next steps (if any)
 
-IMPORTANT: The category field must be exactly one of the internal category names listed above (e.g., "urgent_high_priority", not "Urgent & High Priority"). Use the exact internal name, not the display label.
+IMPORTANT CATEGORIZATION RULES: 
+- The category field must be exactly one of the internal category names listed above (e.g., "prasad_sir", not "Prasad Sir"). 
+- Use the exact internal name, not the display label.
+- ALWAYS check the sender (From field) first when categorizing emails.
+- If a category description mentions a specific sender (like "All mails from prasad goswami sir"), that category should be used for emails from that sender.
+- Consider both the category name and description when making your decision.
+- If the email content doesn't clearly match any category, choose the closest one based on the description.
+- Pay special attention to sender-specific categories - they take priority over general content-based categories.
 
 Format the response as a JSON object with these fields:
 {
@@ -461,6 +534,20 @@ Format the response as a JSON object with these fields:
   "actionItems": ["string"]
 }`;
 
+      // Log the exact prompt being sent to AI for debugging
+      console.log('🤖 AI Prompt being sent:', {
+        emailId: message.id,
+        from: message.from,
+        subject: message.subject,
+        categories: emailAccount.categories.map(cat => ({
+          name: cat.name,
+          label: cat.label,
+          description: cat.description
+        })),
+        promptLength: prompt.length
+      });
+      console.log('📝 Full AI Prompt:', prompt);
+
       // Implement retry logic with exponential backoff
       const maxRetries = 3;
       const baseDelay = 60000; // 1 minute base delay
@@ -469,6 +556,16 @@ Format the response as a JSON object with these fields:
         try {
           // Use the custom prompt with user's categories instead of generic analyzeEmail
           const analysis = await this.makeCustomAnalysisCall(message, prompt);
+          
+          // Log the AI response for debugging
+          console.log('🤖 AI Response received:', {
+            emailId: message.id,
+            from: message.from,
+            aiResponse: analysis,
+            category: analysis.category,
+            summary: analysis.summary?.substring(0, 100) + '...'
+          });
+          
           return analysis;
         } catch (error) {
           // If this is the last attempt, throw the error
@@ -498,7 +595,7 @@ Format the response as a JSON object with these fields:
         const analysis = JSON.parse(response);
         
         // Validate and normalize category to ensure it's a valid internal name
-        let normalizedCategory = analysis.category || 'other';
+        let normalizedCategory = analysis.category;
         
         // Get the valid categories from the email account to validate against
         const user = await User.findById(message.userId);
@@ -510,11 +607,13 @@ Format the response as a JSON object with these fields:
           
           if (emailAccount && emailAccount.categories) {
             const validCategories = emailAccount.categories.map(cat => cat.name);
+            const categoryDetails = emailAccount.categories.map(cat => `${cat.name} (${cat.label}): ${cat.description}`).join(', ');
             
-            // If the AI returned a label instead of name, try to find the matching name
+            // If the AI returned an invalid category, fail the enrichment
             if (!validCategories.includes(normalizedCategory)) {
-              console.warn(`⚠️ AI returned invalid category: "${normalizedCategory}" for email ${message.id}, defaulting to "other"`);
-              normalizedCategory = 'other';
+              console.error(`❌ AI returned invalid category: "${normalizedCategory}" for email ${message.id}. Valid categories: ${validCategories.join(', ')}`);
+              console.error(`📋 Category details: ${categoryDetails}`);
+              throw new Error(`AI returned invalid category: "${normalizedCategory}". Valid categories are: ${validCategories.join(', ')}. Please ensure the AI uses the exact internal name from the provided list.`);
             }
           }
         }
@@ -548,9 +647,30 @@ Format the response as a JSON object with these fields:
           console.log('🔧 Attempting to parse cleaned response:', cleanedResponse);
           const analysis = JSON.parse(cleanedResponse);
           
+          // Validate category again after cleaning
+          let normalizedCategory = analysis.category;
+          const user = await User.findById(message.userId);
+          if (user) {
+            const emailAccount = await EmailAccount.findOne({ 
+              userId: user._id, 
+              email: message.email 
+            });
+            
+            if (emailAccount && emailAccount.categories) {
+              const validCategories = emailAccount.categories.map(cat => cat.name);
+              const categoryDetails = emailAccount.categories.map(cat => `${cat.name} (${cat.label}): ${cat.description}`).join(', ');
+              
+              if (!validCategories.includes(normalizedCategory)) {
+                console.error(`❌ Cleaned response has invalid category: "${normalizedCategory}" for email ${message.id}. Valid categories: ${validCategories.join(', ')}`);
+                console.error(`📋 Category details: ${categoryDetails}`);
+                throw new Error(`Invalid category after cleaning: "${normalizedCategory}". Valid categories are: ${validCategories.join(', ')}. Please ensure the AI uses the exact internal name from the provided list.`);
+              }
+            }
+          }
+          
           return {
             summary: analysis.summary || 'No summary available',
-            category: analysis.category || 'other',
+            category: normalizedCategory,
             priority: analysis.priority || 'medium',
             sentiment: analysis.sentiment || 'neutral',
             actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
@@ -561,10 +681,10 @@ Format the response as a JSON object with these fields:
         } catch (secondParseError) {
           console.error('❌ Failed to parse even after cleaning:', secondParseError.message);
           
-          // Return a fallback analysis
+          // Return a fallback analysis that indicates failure
           return {
             summary: 'Analysis failed - could not parse response',
-            category: 'other',
+            category: null, // No category assigned due to parsing failure
             priority: 'medium',
             sentiment: 'neutral',
             actionItems: [],
