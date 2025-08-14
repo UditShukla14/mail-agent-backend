@@ -164,11 +164,32 @@ Please respond with only the JSON object, no additional text.`;
   
   try {
     const analysis = JSON.parse(response);
+    
+    // Validate that we have the required fields
+    if (!analysis.summary || !analysis.category || !analysis.priority || !analysis.sentiment) {
+      console.error('❌ Claude response missing required fields:', analysis);
+      throw new Error('Claude response missing required fields: summary, category, priority, or sentiment');
+    }
+    
+    // Validate priority and sentiment values
+    const validPriorities = ['urgent', 'high', 'medium', 'low'];
+    const validSentiments = ['positive', 'negative', 'neutral'];
+    
+    if (!validPriorities.includes(analysis.priority)) {
+      console.error('❌ Invalid priority value:', analysis.priority);
+      throw new Error(`Invalid priority value: ${analysis.priority}. Must be one of: ${validPriorities.join(', ')}`);
+    }
+    
+    if (!validSentiments.includes(analysis.sentiment)) {
+      console.error('❌ Invalid sentiment value:', analysis.sentiment);
+      throw new Error(`Invalid sentiment value: ${analysis.sentiment}. Must be one of: ${validSentiments.join(', ')}`);
+    }
+    
     return {
-      summary: analysis.summary || 'No summary available',
+      summary: analysis.summary,
       category: analysis.category,
-      priority: analysis.priority || 'medium',
-      sentiment: analysis.sentiment || 'neutral',
+      priority: analysis.priority,
+      sentiment: analysis.sentiment,
       actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
       enrichedAt: new Date().toISOString(),
       version: '1.0',
@@ -208,11 +229,31 @@ Please respond with only the JSON object, no additional text.`;
       console.log('🔧 Attempting to parse cleaned response:', cleanedResponse);
       const analysis = JSON.parse(cleanedResponse);
       
+      // Validate that we have the required fields
+      if (!analysis.summary || !analysis.category || !analysis.priority || !analysis.sentiment) {
+        console.error('❌ Claude response missing required fields:', analysis);
+        throw new Error('Claude response missing required fields: summary, category, priority, or sentiment');
+      }
+      
+      // Validate priority and sentiment values
+      const validPriorities = ['urgent', 'high', 'medium', 'low'];
+      const validSentiments = ['positive', 'negative', 'neutral'];
+      
+      if (!validPriorities.includes(analysis.priority)) {
+        console.error('❌ Invalid priority value:', analysis.priority);
+        throw new Error(`Invalid priority value: ${analysis.priority}. Must be one of: ${validPriorities.join(', ')}`);
+      }
+      
+      if (!validSentiments.includes(analysis.sentiment)) {
+        console.error('❌ Invalid sentiment value:', analysis.sentiment);
+        throw new Error(`Invalid sentiment value: ${analysis.sentiment}. Must be one of: ${validSentiments.join(', ')}`);
+      }
+      
       return {
-        summary: analysis.summary || 'No summary available',
+        summary: analysis.summary,
         category: analysis.category,
-        priority: analysis.priority || 'medium',
-        sentiment: analysis.sentiment || 'neutral',
+        priority: analysis.priority,
+        sentiment: analysis.sentiment,
         actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
         enrichedAt: new Date().toISOString(),
         version: '1.0',
@@ -221,12 +262,12 @@ Please respond with only the JSON object, no additional text.`;
     } catch (secondParseError) {
       console.error('❌ Failed to parse even after cleaning:', secondParseError.message);
       
-      // Return a fallback analysis
+      // Return error object instead of fallback values
       return {
-        summary: 'Analysis failed - could not parse response',
+        summary: null,
         category: null,
-        priority: 'medium',
-        sentiment: 'neutral',
+        priority: null,
+        sentiment: null,
         actionItems: [],
         enrichedAt: new Date().toISOString(),
         version: '1.0',
@@ -269,15 +310,59 @@ Please respond with only the JSON array, no additional text.`;
     }
     
     return analyses.map((analysis, index) => {
-      // Validate and normalize category to ensure it's a valid internal name
-      let normalizedCategory = analysis.category;
+      // Check if this analysis has an error or is missing required fields
+      if (!analysis || !analysis.summary || !analysis.category || !analysis.priority || !analysis.sentiment) {
+        console.error(`❌ Batch analysis ${index + 1} missing required fields:`, analysis);
+        return {
+          summary: null,
+          category: null,
+          priority: null,
+          sentiment: null,
+          actionItems: [],
+          enrichedAt: new Date().toISOString(),
+          version: '1.0',
+          error: 'Missing required fields in batch analysis'
+        };
+      }
       
-      // Return the analysis without hardcoded category validation
+      // Validate priority and sentiment values
+      const validPriorities = ['urgent', 'high', 'medium', 'low'];
+      const validSentiments = ['positive', 'negative', 'neutral'];
+      
+      if (!validPriorities.includes(analysis.priority)) {
+        console.error(`❌ Batch analysis ${index + 1} has invalid priority:`, analysis.priority);
+        return {
+          summary: null,
+          category: null,
+          priority: null,
+          sentiment: null,
+          actionItems: [],
+          enrichedAt: new Date().toISOString(),
+          version: '1.0',
+          error: `Invalid priority value: ${analysis.priority}`
+        };
+      }
+      
+      if (!validSentiments.includes(analysis.sentiment)) {
+        console.error(`❌ Batch analysis ${index + 1} has invalid sentiment:`, analysis.sentiment);
+        return {
+          summary: null,
+          category: null,
+          priority: null,
+          sentiment: null,
+          actionItems: [],
+          enrichedAt: new Date().toISOString(),
+          version: '1.0',
+          error: `Invalid sentiment value: ${analysis.sentiment}`
+        };
+      }
+      
+      // Valid analysis
       return {
-        summary: analysis.summary || 'No summary available',
-        category: normalizedCategory,
-        priority: analysis.priority || 'medium',
-        sentiment: analysis.sentiment || 'neutral',
+        summary: analysis.summary,
+        category: analysis.category,
+        priority: analysis.priority,
+        sentiment: analysis.sentiment,
         actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
         enrichedAt: new Date().toISOString(),
         version: '1.0',

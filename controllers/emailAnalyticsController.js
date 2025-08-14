@@ -554,8 +554,8 @@ export const getUnreadEmailsSummary = async (req, res) => {
       from: email.from || '',
       timestamp: email.timestamp ? email.timestamp.toISOString() : new Date().toISOString(),
       aiMeta: {
-        priority: email.aiMeta?.priority || 'medium',
-        category: email.aiMeta?.category || 'Other',
+        priority: email.aiMeta?.priority || null,
+        category: email.aiMeta?.category || null,
         summary: email.aiMeta?.summary || ''
       },
       important: Boolean(email.important),

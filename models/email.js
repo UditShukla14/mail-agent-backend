@@ -22,24 +22,24 @@ const emailSchema = new mongoose.Schema({
   aiMeta: {
     summary: { type: String },
     category: { 
-      type: String,
-      default: 'Other'
+      type: String
     },
     priority: {
       type: String,
-      enum: ['urgent', 'high', 'medium', 'low'],
-      default: 'medium'
+      enum: ['urgent', 'high', 'medium', 'low']
     },
     sentiment: {
       type: String,
-      enum: ['positive', 'negative', 'neutral'],
-      default: 'neutral'
+      enum: ['positive', 'negative', 'neutral']
     },
     actionItems: [String],
     enrichedAt: { type: Date },
     version: { type: String },
     error: { type: String }
-  }
+  },
+  
+  // Processing status
+  isProcessed: { type: Boolean, default: false }
 }, {
   timestamps: true
 });
@@ -49,6 +49,7 @@ emailSchema.index({ userId: 1, folder: 1 });
 emailSchema.index({ userId: 1, timestamp: -1 });
 emailSchema.index({ userId: 1, 'aiMeta.category': 1 });
 emailSchema.index({ userId: 1, 'aiMeta.priority': 1 });
+emailSchema.index({ userId: 1, isProcessed: 1 });
 // Compound unique index: message ID should be unique per email account
 emailSchema.index({ email: 1, id: 1 }, { unique: true });
 

@@ -63,6 +63,18 @@ class EmailEnrichmentService {
       // Generate AI analysis
       const analysis = await this.generateAnalysis(email);
       
+      // Check if the analysis has an error
+      if (analysis.error) {
+        console.error(`❌ AI analysis failed for email ${email.id}:`, analysis.error);
+        throw new Error(`AI analysis failed: ${analysis.error}`);
+      }
+      
+      // Validate that we have all required fields
+      if (!analysis.summary || !analysis.category || !analysis.priority || !analysis.sentiment) {
+        console.error(`❌ AI analysis missing required fields for email ${email.id}:`, analysis);
+        throw new Error('AI analysis missing required fields: summary, category, priority, or sentiment');
+      }
+      
       // Validate and normalize category to ensure it's a valid internal name
       let normalizedCategory = analysis.category;
       
@@ -84,12 +96,12 @@ class EmailEnrichmentService {
         }
       }
       
-      // Remove fallback values if they don't exist
+      // Use the validated analysis without fallback values
       const cleanedAnalysis = {
-        summary: analysis.summary || 'No summary available',
+        summary: analysis.summary,
         category: normalizedCategory,
-        priority: analysis.priority || 'medium',
-        sentiment: analysis.sentiment || 'neutral',
+        priority: analysis.priority,
+        sentiment: analysis.sentiment,
         actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
         enrichedAt: new Date().toISOString(),
         version: '1.0',
@@ -634,10 +646,10 @@ Format the response as a JSON object with these fields:
         }
         
         return {
-          summary: analysis.summary || 'No summary available',
+          summary: analysis.summary,
           category: normalizedCategory,
-          priority: analysis.priority || 'medium',
-          sentiment: analysis.sentiment || 'neutral',
+          priority: analysis.priority,
+          sentiment: analysis.sentiment,
           actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
           enrichedAt: new Date().toISOString(),
           version: '1.0',
@@ -684,10 +696,10 @@ Format the response as a JSON object with these fields:
           }
           
           return {
-            summary: analysis.summary || 'No summary available',
+            summary: analysis.summary,
             category: normalizedCategory,
-            priority: analysis.priority || 'medium',
-            sentiment: analysis.sentiment || 'neutral',
+            priority: analysis.priority,
+            sentiment: analysis.sentiment,
             actionItems: Array.isArray(analysis.actionItems) ? analysis.actionItems : [],
             enrichedAt: new Date().toISOString(),
             version: '1.0',
@@ -696,12 +708,12 @@ Format the response as a JSON object with these fields:
         } catch (secondParseError) {
           console.error('❌ Failed to parse even after cleaning:', secondParseError.message);
           
-          // Return a fallback analysis that indicates failure
+          // Return error object instead of fallback values
           return {
-            summary: 'Analysis failed - could not parse response',
-            category: null, // No category assigned due to parsing failure
-            priority: 'medium',
-            sentiment: 'neutral',
+            summary: null,
+            category: null,
+            priority: null,
+            sentiment: null,
             actionItems: [],
             enrichedAt: new Date().toISOString(),
             version: '1.0',
