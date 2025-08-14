@@ -1,6 +1,5 @@
 import Email from '../models/email.js';
 import emailService from './emailService.js';
-import enrichmentQueueService from './enrichmentQueueService.js';
 import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
 import { makeClaudeApiCall } from './claudeApiService.js';
@@ -238,6 +237,22 @@ class EmailEnrichmentService {
     }
     
     return userSocket;
+  }
+
+  // Unregister a socket when it disconnects
+  unregisterSocket(socket) {
+    if (!this.io) {
+      console.log('⚠️ IO not available for socket unregistration');
+      return;
+    }
+    
+    console.log(`📡 Unregistering socket: ${socket.id} for user: ${socket.worxstreamUserId}`);
+    
+    // The socket is automatically removed from IO when it disconnects
+    // This method is mainly for logging and cleanup purposes
+    if (socket.worxstreamUserId) {
+      console.log(`🧹 Socket cleanup completed for user: ${socket.worxstreamUserId}`);
+    }
   }
 
   async enrichBatch(emails, socket) {

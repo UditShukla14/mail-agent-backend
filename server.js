@@ -270,10 +270,10 @@ io.on('connection', (socket) => {
     }
   });
   
-  // Add debugging for all events
-  socket.onAny((eventName, ...args) => {
-    console.log(`📨 Socket event received: ${eventName}`, args);
-  });
+  // Add debugging for all events (commented out as onAny is not available in this Socket.IO version)
+  // socket.onAny((eventName, ...args) => {
+  //   console.log(`📨 Socket event received: ${eventName}`, args);
+  // });
 });
 
 // Connect to MongoDB

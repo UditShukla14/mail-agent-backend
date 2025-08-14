@@ -90,12 +90,30 @@ class WorxstreamApiService {
         },
       });
       
-      console.log(`✅ Token verification successful:`, response.data);
+      console.log(`✅ Token verification successful:`, response);
+      console.log(`🔍 Response structure:`, {
+        hasUser: !!response.user,
+        hasId: !!response.id,
+        hasEmail: !!response.email,
+        responseKeys: Object.keys(response),
+        responseType: typeof response
+      });
       
-      return {
-        success: true,
-        user: response.data,
-      };
+      // The response should already contain the user data structure
+      // Check if it has the expected format
+      if (response && (response.user || response.id || response.email)) {
+        return {
+          success: true,
+          user: response.user || response, // Use response.user if it exists, otherwise use response directly
+        };
+      } else {
+        console.warn('⚠️ Unexpected response format:', response);
+        return {
+          success: false,
+          error: 'Invalid response format from API',
+          status: 500,
+        };
+      }
     } catch (error) {
       console.error(`❌ Token verification failed:`, error.message);
       return {
@@ -115,32 +133,18 @@ class WorxstreamApiService {
       },
     });
     
-    return response.data;
+    return response;
   }
 
-  // Validate user subscription/access
-  async validateUserAccess(token) {
-    try {
-      const response = await this.request('/api/v1/master-subscriptions/active/list', {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      
-      return {
-        success: true,
-        subscriptions: response.data,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message,
-        status: error.status,
-      };
-    }
-  }
+  // Note: Subscription validation is now handled through the user info API
+  // which includes subscription details, eliminating the need for separate API calls
 }
 
+// Export the config for use in other files
+export { WORXSTREAM_API_CONFIG };
+
 // Create API instance
-export const worxstreamApi = new WorxstreamApiService(WORXSTREAM_API_CONFIG); 
+export const worxstreamApi = new WorxstreamApiService(WORXSTREAM_API_CONFIG);
+
+// Default export for the class
+export default WorxstreamApiService; 

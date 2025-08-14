@@ -1,7 +1,7 @@
 import Email from '../models/email.js';
 import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
-import emailEnrichmentService from '../services/emailEnrichment.js';
+
 
 // Helper function to ensure consistent data format
 const ensureAnalyticsData = (data, defaultValue = []) => {
@@ -271,19 +271,9 @@ export const getEmailAnalytics = async (req, res) => {
     const emailAccount = await EmailAccount.findOne({ userId: user._id, email: activeEmail });
     const allCategories = emailAccount?.categories || [];
     
-    console.log(`🔍 Analytics: Active account: ${activeEmail}`);
-    console.log(`🔍 Analytics: Found ${allCategories.length} categories for active account`);
-    console.log(`🔍 Analytics: Categories:`, allCategories.map(c => c.name));
-    
-    console.log(`🔍 Analytics: Base match criteria:`, baseMatchCriteria);
-    console.log(`🔍 Analytics: User emails:`, userEmails);
-    console.log(`🔍 Analytics: Target email:`, targetEmail);
-    
     // Get actual email counts for each category for THIS specific account
     const categoriesMatchCriteria = { ...baseMatchCriteria };
     categoriesMatchCriteria['aiMeta.category'] = { $exists: true, $ne: null };
-    
-    console.log(`🔍 Analytics: Category match criteria:`, categoriesMatchCriteria);
 
     // Get actual email counts for each category
     const actualCategoriesInDB = await Email.aggregate([
@@ -298,29 +288,9 @@ export const getEmailAnalytics = async (req, res) => {
       }
     ]);
     
-    console.log(`🔍 Analytics: Actual categories in DB:`, actualCategoriesInDB);
+
     
-    // Debug: Check if emails have aiMeta.category field
-    const emailsWithCategory = await Email.countDocuments(categoriesMatchCriteria);
-    const totalEmails = await Email.countDocuments(baseMatchCriteria);
-    console.log(`🔍 Analytics: Emails with category field: ${emailsWithCategory}/${totalEmails}`);
-    
-    // Debug: Sample emails to see what's in aiMeta.category
-    const sampleEmails = await Email.find(categoriesMatchCriteria).limit(5).select('aiMeta.category');
-    console.log(`🔍 Analytics: Sample emails with categories:`, sampleEmails.map(e => e.aiMeta?.category));
-    
-    // Debug: Check what emails exist for this account
-    const accountEmails = await Email.find(baseMatchCriteria).limit(3).select('email aiMeta.category');
-    console.log(`🔍 Analytics: Sample account emails:`, accountEmails.map(e => ({ email: e.email, category: e.aiMeta?.category })));
-    
-    // Debug: Check ALL emails for this account to see which one is missing
-    const allAccountEmails = await Email.find(baseMatchCriteria).select('id email aiMeta.category aiMeta.enrichedAt');
-    console.log(`🔍 Analytics: ALL emails for account:`, allAccountEmails.map(e => ({ 
-      id: e.id, 
-      email: e.email, 
-      category: e.aiMeta?.category,
-      enrichedAt: e.aiMeta?.enrichedAt
-    })));
+
 
     const emailCategories = await Email.aggregate([
       { 
@@ -335,7 +305,7 @@ export const getEmailAnalytics = async (req, res) => {
       }
     ]);
     
-    console.log(`🔍 Analytics: Email categories aggregation result:`, emailCategories);
+
 
         // Merge categories from EmailAccount with actual email counts
     const categories = allCategories.map(category => {
@@ -358,11 +328,7 @@ export const getEmailAnalytics = async (req, res) => {
         });
       }
       
-      if (emailCategory) {
-        console.log(`🔍 Analytics: Category "${category.name}" matched: "${emailCategory._id}" -> "${category.name}"`);
-      } else {
-        console.log(`🔍 Analytics: Category "${category.name}" - No matching emails found (emails may be storing label instead of name)`);
-      }
+
       
       return {
         name: category.name,
@@ -373,7 +339,7 @@ export const getEmailAnalytics = async (req, res) => {
       };
     });
     
-    console.log(`🔍 Analytics: Final merged categories:`, categories.map(c => ({ name: c.name, value: c.value, unreadCount: c.unreadCount })));
+
     
     // Since emails can only have categories from EmailAccount, we don't need to add unmatched categories
     // All categories should be properly matched above
@@ -381,7 +347,7 @@ export const getEmailAnalytics = async (req, res) => {
     // Note: Custom categories are now handled automatically above
     // No need for special category mapping since we show all categories that exist in emails
     
-    console.log(`🔍 Analytics: Final categories after adding custom ones:`, categories.map(c => ({ name: c.name, value: c.value })));
+
 
     // Get sentiment analysis for this specific email and folder
     const sentimentMatchCriteria = { ...baseMatchCriteria };
