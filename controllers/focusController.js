@@ -20,7 +20,9 @@ export const addFocusItem = async (req, res) => {
   try {
     console.log('🔍 addFocusItem called with:', {
       body: req.body,
-      user: req.user
+      user: req.user,
+      extractedValue: req.body.value,
+      valueType: typeof req.body.value
     });
 
     const { email: queryEmail, type, value } = req.body;
@@ -151,7 +153,9 @@ export const removeFocusItem = async (req, res) => {
     console.log('🗑️ removeFocusItem called with:', {
       params: req.params,
       body: req.body,
-      user: req.user
+      user: req.user,
+      folderNameFromParams: req.params.folderName,
+      emailFromBody: req.body.email
     });
 
     const { folderName } = req.params;

@@ -16,7 +16,7 @@ router.use(authenticateUser);
 router.post('/add', addFocusItem);
 
 // Remove a focus item
-router.delete('/:folderName', removeFocusItem);
+router.post('/:folderName/remove', removeFocusItem);
 
 // Get all focus items for an email account
 router.get('/', getFocusItems);
