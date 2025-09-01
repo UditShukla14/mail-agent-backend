@@ -2,6 +2,7 @@ import { getToken } from '../utils/tokenManager.js';
 import { getMessagesByFolder, getMessageById } from './outlookService.js';
 import Email from '../models/email.js';
 import User from '../models/User.js';
+import focusAssignmentService from './focusAssignmentService.js';
 
 class EmailService {
   async getFolderMessages(worxstreamUserId, email, folderId, page = 1, pageSize = 20) {
@@ -71,6 +72,24 @@ class EmailService {
             return null;
           }
 
+          // Check if this email should be assigned to a focus folder
+          let focusFolder = null;
+          try {
+            focusFolder = await focusAssignmentService.assignFocusFolder(
+              emailData, 
+              user._id, 
+              email
+            );
+          } catch (error) {
+            console.error('⚠️ Error assigning focus folder:', error);
+            // Continue without focus folder assignment
+          }
+          
+          // Add focus folder to email data if assigned
+          if (focusFolder) {
+            emailData.focusFolder = focusFolder;
+          }
+          
           const savedMsg = await Email.findOneAndUpdate(
             { id: msg.id, email: email },
             { $set: emailData },
@@ -194,16 +213,31 @@ class EmailService {
       // If message doesn't exist in DB, save it with AI metadata
       if (!dbMessage) {
         console.log(`💾 Saving new message ${messageId} to database`);
+        
+        // Check if this email should be assigned to a focus folder
+        let focusFolder = null;
+        try {
+          focusFolder = await focusAssignmentService.assignFocusFolder(
+            outlookMessage, 
+            user._id, 
+            email
+          );
+        } catch (error) {
+          console.error('⚠️ Error assigning focus folder:', error);
+          // Continue without focus folder assignment
+        }
+        
         const savedMessage = await Email.create({
           ...outlookMessage,
           userId: user._id,
           email: email,
+          focusFolder: focusFolder, // Add focus folder if assigned
           isProcessed: false
         });
         
         // Update the combined message with the new database ID
         combinedMessage.dbId = savedMessage._id.toString();
-        console.log(`💾 New message saved with database ID: ${combinedMessage.dbId}`);
+        console.log(`💾 New message saved with database ID: ${combinedMessage.dbId}${focusFolder ? ` and focus folder: ${focusFolder}` : ''}`);
       }
 
       console.log(`✅ Returning combined message with ${aiMetadata ? 'AI metadata' : 'no AI metadata'} and ${outlookMessage.attachments?.length || 0} attachments`);

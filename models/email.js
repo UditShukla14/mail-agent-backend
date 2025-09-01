@@ -15,6 +15,7 @@ const emailSchema = new mongoose.Schema({
   timestamp: { type: Date, required: true },
   read: { type: Boolean, default: false },
   folder: { type: String, required: true },
+  focusFolder: { type: String, default: null }, // Focus folder this email belongs to
   important: { type: Boolean, default: false },
   flagged: { type: Boolean, default: false },
   
@@ -50,6 +51,7 @@ emailSchema.index({ userId: 1, timestamp: -1 });
 emailSchema.index({ userId: 1, 'aiMeta.category': 1 });
 emailSchema.index({ userId: 1, 'aiMeta.priority': 1 });
 emailSchema.index({ userId: 1, isProcessed: 1 });
+emailSchema.index({ userId: 1, focusFolder: 1 }); // Index for focus folder queries
 // Compound unique index: message ID should be unique per email account
 emailSchema.index({ email: 1, id: 1 }, { unique: true });
 

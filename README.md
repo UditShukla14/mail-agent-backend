@@ -91,6 +91,12 @@ LOG_LEVEL=info
 - `POST /ai-reply/generate-compose` - Generate new email
 - `POST /ai-reply/improve-email` - Improve existing email
 
+### Focus Management
+- `POST /focus/add` - Add a new focus item (subject or email)
+- `DELETE /focus/:folderName` - Remove a focus item
+- `GET /focus/` - Get all focus items for an email account
+- `GET /focus/:folderName/emails` - Get emails for a specific focus folder
+
 ## Authentication Flow
 
 1. User logs into worXstream main application
@@ -120,6 +126,64 @@ LOG_LEVEL=info
   email: String,
   worxstreamUserId: Number,  // Changed from appUserId: String
   name: String               // Added name field
+}
+```
+
+### EmailAccount Model
+```javascript
+{
+  userId: ObjectId,
+  email: String,
+  provider: String,
+  categories: [{
+    name: String,
+    label: String,
+    description: String,
+    color: String,
+    createdAt: Date
+  }],
+  focusedItems: [{
+    type: String,           // 'subject' or 'email'
+    value: String,          // subject text or email address
+    folderName: String,     // generated focus folder name
+    createdAt: Date,
+    lastActivity: Date,
+    emailCount: Number,
+    isActive: Boolean
+  }],
+  isActive: Boolean
+}
+```
+
+### Email Model
+```javascript
+{
+  id: String,
+  userId: ObjectId,
+  email: String,
+  from: String,
+  to: String,
+  cc: String,
+  bcc: String,
+  subject: String,
+  content: String,
+  timestamp: Date,
+  read: Boolean,
+  folder: String,
+  focusFolder: String,      // Focus folder this email belongs to
+  important: Boolean,
+  flagged: Boolean,
+  aiMeta: {
+    summary: String,
+    category: String,
+    priority: String,
+    sentiment: String,
+    actionItems: [String],
+    enrichedAt: Date,
+    version: String,
+    error: String
+  },
+  isProcessed: Boolean
 }
 ```
 
@@ -156,6 +220,36 @@ If migrating from the old version:
 3. Update user ID references from appUserId to worxstreamUserId
 4. Remove any local JWT handling
 5. Update OAuth callback URLs to work with the new flow
+
+## Focus Feature
+
+The Focus feature allows users to track ongoing conversations and important topics by creating virtual folders for specific subjects or email addresses.
+
+### How It Works
+
+1. **Subject Focus**: Users can mark any email subject as "focused" to track all emails with similar subjects
+2. **Email Focus**: Users can focus on specific email addresses to track all communication with that person/entity
+3. **Automatic Assignment**: New emails are automatically assigned to focus folders if they match the criteria
+4. **Real-time Updates**: Focus folders are updated in real-time as new emails arrive
+
+### Focus Item Types
+
+- **Subject Focus**: Matches emails with similar subjects (case-insensitive, partial matching)
+- **Email Focus**: Matches emails where the address appears in from/to/cc/bcc fields
+
+### Benefits
+
+- **Conversation Tracking**: Keep all related emails in one virtual folder
+- **Priority Management**: Focus on important topics or people
+- **Organization**: Automatically organize emails without manual sorting
+- **Performance**: Efficient querying with database indexes
+
+### Technical Implementation
+
+- **Caching**: Focus items are cached for performance (5-minute expiry)
+- **Automatic Assignment**: New emails are checked against focus criteria during save
+- **Database Indexing**: Optimized queries for focus folder operations
+- **Real-time Updates**: Focus item activity is updated when new emails arrive
 
 ## Security
 

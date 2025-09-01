@@ -17,6 +17,7 @@ import emailCategoriesRoutes from './routes/emailCategories.js';
 import aiReplyRoutes from './routes/aiReply.js';
 import tokenRefreshRoutes from './routes/tokenRefresh.js';
 import calendarRoutes from './routes/calendar.js';
+import focusRoutes from './routes/focus.js';
 
 import './services/enrichmentQueueService.js'; // This will initialize the service
 import tokenRefreshService from './services/tokenRefreshService.js';
@@ -150,6 +151,7 @@ app.use('/email-categories', emailCategoriesRoutes);
 app.use('/ai-reply', aiReplyRoutes);
 app.use('/token-refresh', tokenRefreshRoutes);
 app.use('/calendar', calendarRoutes);
+app.use('/focus', focusRoutes);
 
 // Health check endpoint
 app.get('/', (req, res) => {

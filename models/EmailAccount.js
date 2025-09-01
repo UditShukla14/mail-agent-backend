@@ -27,6 +27,18 @@ const emailAccountSchema = new mongoose.Schema({
     }],
     default: [] // No default categories - users must select their own
   },
+  focusedItems: {
+    type: [{
+      type: { type: String, enum: ['subject', 'email'], required: true },
+      value: { type: String, required: true }, // subject text or email address
+      folderName: { type: String, required: true }, // generated folder name
+      createdAt: { type: Date, default: Date.now },
+      lastActivity: { type: Date, default: Date.now },
+      emailCount: { type: Number, default: 0 },
+      isActive: { type: Boolean, default: true }
+    }],
+    default: []
+  },
   isActive: {
     type: Boolean,
     default: true
@@ -37,5 +49,9 @@ const emailAccountSchema = new mongoose.Schema({
 
 // Compound index to ensure unique email per user
 emailAccountSchema.index({ userId: 1, email: 1 }, { unique: true });
+
+// Index for focused items queries
+emailAccountSchema.index({ userId: 1, 'focusedItems.value': 1 });
+emailAccountSchema.index({ userId: 1, 'focusedItems.folderName': 1 });
 
 export default mongoose.model('EmailAccount', emailAccountSchema); 
