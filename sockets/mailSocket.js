@@ -112,16 +112,6 @@ export const initMailSocket = (socket, io) => {
     }
   });
 
-  // Test handler to verify socket communication
-  socket.on('mail:test', (data) => {
-    console.log('🧪 Test event received:', data);
-    socket.emit('mail:testResponse', { 
-      message: 'Test response from backend',
-      timestamp: new Date().toISOString(),
-      data: data
-    });
-    console.log('📤 Sent test response');
-  });
 
   // New handler for enriching specific emails
   socket.on('mail:enrichEmails', async ({ worxstreamUserId, email, messageIds, forceReanalyze = false }) => {
