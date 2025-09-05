@@ -224,70 +224,61 @@ export const initMailSocket = (socket, io) => {
         let hasMore = false;
         
         if (page === 1) {
-          // First page: try database with filters, then fetch from Outlook if needed
-          messages = await emailService.getFolderMessages(userId, email, folderId, page, 20, filters);
+          // First page: always fetch from Outlook to get fresh data and check for more messages
+          console.log('📥 First page: fetching from Outlook...');
           
-          // If we don't have enough messages in database, fetch from Outlook
-          if (messages.length < 20) {
-            console.log('📥 Not enough messages in database, fetching from Outlook...');
+          const token = await getToken(userId, email, 'outlook');
+          if (token) {
+            const key = `${socket.id}-${folderId}`;
+            const nextLink = folderPaginationMap.get(key);
             
-            const token = await getToken(userId, email, 'outlook');
-            if (token) {
-              const key = `${socket.id}-${folderId}`;
-              const nextLink = folderPaginationMap.get(key);
-              
-              const { messages: outlookMessages, nextLink: newNextLink } = await getMessagesByFolder(token, folderId, nextLink);
-              if (newNextLink) folderPaginationMap.set(key, newNextLink);
-              
-              // Get user from database
-              const user = await User.findOne({ worxstreamUserId: userId });
-              if (user) {
-                // Save new messages to database
-                const savedMessages = await Promise.all(outlookMessages.map(async msg => {
-                  try {
-                    const emailData = {
-                      id: msg.id,
-                      userId: user._id,
-                      email: email,
-                      from: msg.from || '',
-                      to: msg.to || '',
-                      cc: msg.cc || '',
-                      bcc: msg.bcc || '',
-                      subject: msg.subject || '(No Subject)',
-                      content: msg.content || '',
-                      preview: msg.preview || '',
-                      timestamp: msg.timestamp || new Date(),
-                      read: msg.read || false,
-                      folder: folderId,
-                      important: msg.important || false,
-                      flagged: msg.flagged || false,
-                      isProcessed: false,
-                      updatedAt: new Date()
-                    };
+            const { messages: outlookMessages, nextLink: newNextLink } = await getMessagesByFolder(token, folderId, nextLink);
+            if (newNextLink) folderPaginationMap.set(key, newNextLink);
+            
+            // Get user from database
+            const user = await User.findOne({ worxstreamUserId: userId });
+            if (user) {
+              // Save new messages to database
+              const savedMessages = await Promise.all(outlookMessages.map(async msg => {
+                try {
+                  const emailData = {
+                    id: msg.id,
+                    userId: user._id,
+                    email: email,
+                    from: msg.from || '',
+                    to: msg.to || '',
+                    cc: msg.cc || '',
+                    bcc: msg.bcc || '',
+                    subject: msg.subject || '(No Subject)',
+                    content: msg.content || '',
+                    preview: msg.preview || '',
+                    timestamp: msg.timestamp || new Date(),
+                    read: msg.read || false,
+                    folder: folderId,
+                    important: msg.important || false,
+                    flagged: msg.flagged || false,
+                    isProcessed: false,
+                    updatedAt: new Date()
+                  };
 
-                    const savedMsg = await Email.findOneAndUpdate(
-                      { id: msg.id, email: email },
-                      { $set: emailData },
-                      { upsert: true, new: true, setDefaultsOnInsert: true }
-                    );
-                    return savedMsg;
-                  } catch (error) {
-                    console.error(`❌ Failed to save message ${msg.id}:`, error);
-                    return null;
-                  }
-                }));
+                  const savedMsg = await Email.findOneAndUpdate(
+                    { id: msg.id, email: email },
+                    { $set: emailData },
+                    { upsert: true, new: true, setDefaultsOnInsert: true }
+                  );
+                  return savedMsg;
+                } catch (error) {
+                  console.error(`❌ Failed to save message ${msg.id}:`, error);
+                  return null;
+                }
+              }));
 
-                // Now get the filtered messages from database (including newly saved ones)
-                messages = await emailService.getFolderMessages(userId, email, folderId, page, 20, filters);
-              }
-              
-              // Check if there are more messages in Outlook
-              hasMore = !!newNextLink;
+              // Get filtered messages from database (including newly saved ones)
+              messages = await emailService.getFolderMessages(userId, email, folderId, page, 20, filters);
             }
-          } else {
-            // We have enough messages from database, check if there are more
-            const totalCount = await emailService.getFolderMessageCount(userId, email, folderId, filters);
-            hasMore = totalCount > page * 20;
+            
+            // Check if there are more messages in Outlook
+            hasMore = !!newNextLink;
           }
         } else {
           // Load more: fetch from Outlook API without filters
