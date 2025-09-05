@@ -10,6 +10,7 @@ class MailHandler {
     try {
       console.log('Handling getFolder request:', data);
       const { worxstreamUserId, email, folderId, page = 1, filters = {} } = data;
+      console.log('🔍 Received filters from frontend:', filters);
       const pageSize = 20; // Number of emails per page
       const messages = await emailService.getFolderMessages(worxstreamUserId, email, folderId, page, pageSize, filters);
       
@@ -84,7 +85,13 @@ class MailHandler {
 
   registerHandlers(socket) {
     console.log('Registering mail handlers for socket:', socket.id);
-    socket.on('mail:getFolder', data => this.handleGetFolder(socket, data));
+    socket.on('mail:getFolder', data => {
+      console.log('📨 Received mail:getFolder event:', data);
+      this.handleGetFolder(socket, data);
+    });
+    socket.on('test', data => {
+      console.log('🧪 Received test event from frontend:', data);
+    });
     socket.on('mail:getMessage', data => this.handleGetMessage(socket, data));
     socket.on('mail:markRead', data => this.handleMarkRead(socket, data));
     socket.on('mail:markImportant', data => this.handleMarkImportant(socket, data));
