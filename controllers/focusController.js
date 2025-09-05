@@ -332,7 +332,7 @@ export const getFocusFolderEmails = async (req, res) => {
     });
 
     const { folderName } = req.params;
-    const { email: queryEmail, page = 1, limit = 20 } = req.query;
+    const { email: queryEmail, page = 1, limit = 20, category, priority, sentiment } = req.query;
     const worxstreamUserId = req.user.id;
 
     if (!worxstreamUserId) {
@@ -364,23 +364,35 @@ export const getFocusFolderEmails = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const limitNum = parseInt(limit);
 
-    // Get emails for the focus folder
-    const emails = await Email.find({
+    // Build filter criteria
+    const filterCriteria = {
       userId: user._id,
       email: queryEmail,
       focusFolder: folderName
-    })
+    };
+
+    // Add AI metadata filters if provided
+    if (category && category !== 'All') {
+      filterCriteria['aiMeta.category'] = category;
+    }
+    if (priority && priority !== 'All') {
+      filterCriteria['aiMeta.priority'] = priority;
+    }
+    if (sentiment && sentiment !== 'All') {
+      filterCriteria['aiMeta.sentiment'] = sentiment;
+    }
+
+    console.log('🔍 Filter criteria:', filterCriteria);
+
+    // Get emails for the focus folder with filters
+    const emails = await Email.find(filterCriteria)
     .sort({ timestamp: -1 })
     .skip(skip)
     .limit(limitNum)
     .select('-content'); // Exclude content for performance
 
-    // Get total count
-    const totalEmails = await Email.countDocuments({
-      userId: user._id,
-      email: queryEmail,
-      focusFolder: folderName
-    });
+    // Get total count with same filters
+    const totalEmails = await Email.countDocuments(filterCriteria);
 
     console.log(`📧 Found ${emails.length} emails in focus folder: ${folderName}`);
 

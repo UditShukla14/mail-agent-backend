@@ -5,7 +5,7 @@ import User from '../models/User.js';
 import focusAssignmentService from './focusAssignmentService.js';
 
 class EmailService {
-  async getFolderMessages(worxstreamUserId, email, folderId, page = 1, pageSize = 20) {
+  async getFolderMessages(worxstreamUserId, email, folderId, page = 1, pageSize = 20, filters = {}) {
     try {
       // Validate input parameters
       if (!worxstreamUserId || !email || !folderId) {
@@ -13,7 +13,7 @@ class EmailService {
         throw new Error('Missing required parameters');
       }
 
-      console.log(`🔄 Getting folder messages for ${email} in folder ${folderId}`);
+      console.log(`🔄 Getting folder messages for ${email} in folder ${folderId} with filters:`, filters);
 
       const token = await getToken(worxstreamUserId, email, 'outlook');
       if (!token) {
@@ -110,6 +110,13 @@ class EmailService {
 
       const validMessages = savedMessages.filter(Boolean);
       console.log(`✅ Successfully saved ${validMessages.length} messages`);
+
+      // Apply filters to the saved messages if any filters are provided
+      if (Object.keys(filters).length > 0) {
+        const filteredMessages = this.applyFilters(validMessages, filters);
+        console.log(`🔍 Applied filters, ${filteredMessages.length} messages match criteria`);
+        return filteredMessages;
+      }
 
       return validMessages;
     } catch (error) {
@@ -301,6 +308,37 @@ class EmailService {
       console.error('Error deleting message:', error);
       throw error;
     }
+  }
+
+  // Apply filters to messages
+  applyFilters(messages, filters) {
+    return messages.filter(message => {
+      // Category filter
+      if (filters.category && filters.category !== 'All') {
+        const messageCategory = message.aiMeta?.category;
+        if (!messageCategory || messageCategory !== filters.category) {
+          return false;
+        }
+      }
+
+      // Priority filter
+      if (filters.priority && filters.priority !== 'All') {
+        const messagePriority = message.aiMeta?.priority;
+        if (!messagePriority || messagePriority !== filters.priority) {
+          return false;
+        }
+      }
+
+      // Sentiment filter
+      if (filters.sentiment && filters.sentiment !== 'All') {
+        const messageSentiment = message.aiMeta?.sentiment;
+        if (!messageSentiment || messageSentiment !== filters.sentiment) {
+          return false;
+        }
+      }
+
+      return true;
+    });
   }
 }
 

@@ -9,9 +9,9 @@ class MailHandler {
   async handleGetFolder(socket, data) {
     try {
       console.log('Handling getFolder request:', data);
-      const { worxstreamUserId, email, folderId, page = 1 } = data;
+      const { worxstreamUserId, email, folderId, page = 1, filters = {} } = data;
       const pageSize = 20; // Number of emails per page
-              const messages = await emailService.getFolderMessages(worxstreamUserId, email, folderId, page, pageSize);
+      const messages = await emailService.getFolderMessages(worxstreamUserId, email, folderId, page, pageSize, filters);
       
       console.log(`Retrieved ${messages.length} messages from folder ${folderId}`);
       
