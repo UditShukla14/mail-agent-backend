@@ -252,7 +252,16 @@ export const initMailSocket = (socket, io) => {
                     subject: msg.subject || '(No Subject)',
                     content: msg.content || '',
                     preview: msg.preview || '',
-                    timestamp: msg.timestamp || new Date(),
+                    timestamp: (() => {
+                      if (msg.timestamp && msg.timestamp !== '') {
+                        const receivedTime = new Date(msg.timestamp);
+                        console.log(`📧 Email timestamp from Outlook: ${msg.timestamp} -> ${receivedTime.toISOString()}`);
+                        return receivedTime;
+                      } else {
+                        console.log(`⚠️ Missing timestamp for email ${msg.id}, using current time`);
+                        return new Date();
+                      }
+                    })(),
                     read: msg.read || false,
                     folder: folderId,
                     important: msg.important || false,
@@ -275,10 +284,14 @@ export const initMailSocket = (socket, io) => {
 
               // Get filtered messages from database (including newly saved ones)
               messages = await emailService.getFolderMessages(userId, email, folderId, page, 20, filters);
+              
+              // Check if there are more messages by getting one extra message
+              const nextPageMessages = await emailService.getFolderMessages(userId, email, folderId, page + 1, 1, filters);
+              hasMore = nextPageMessages.length > 0;
             }
             
-            // Check if there are more messages in Outlook
-            hasMore = !!newNextLink;
+            // Also check if there are more messages in Outlook
+            hasMore = hasMore || !!newNextLink;
           }
         } else {
           // Load more: fetch from Outlook API without filters
@@ -309,7 +322,16 @@ export const initMailSocket = (socket, io) => {
                     subject: msg.subject || '(No Subject)',
                     content: msg.content || '',
                     preview: msg.preview || '',
-                    timestamp: msg.timestamp || new Date(),
+                    timestamp: (() => {
+                      if (msg.timestamp && msg.timestamp !== '') {
+                        const receivedTime = new Date(msg.timestamp);
+                        console.log(`📧 Email timestamp from Outlook: ${msg.timestamp} -> ${receivedTime.toISOString()}`);
+                        return receivedTime;
+                      } else {
+                        console.log(`⚠️ Missing timestamp for email ${msg.id}, using current time`);
+                        return new Date();
+                      }
+                    })(),
                     read: msg.read || false,
                     folder: folderId,
                     important: msg.important || false,
@@ -330,28 +352,16 @@ export const initMailSocket = (socket, io) => {
                 }
               }));
 
-              // Get all messages from database and apply filters on frontend
-              const allMessages = await emailService.getFolderMessages(userId, email, folderId, 1, 1000, {}); // Get all messages
+              // Get messages from database with proper pagination
+              messages = await emailService.getFolderMessages(userId, email, folderId, page, 20, filters);
               
-              // Apply filters on frontend
-              let filteredMessages = allMessages;
-              if (filters.category && filters.category !== 'All') {
-                filteredMessages = filteredMessages.filter(msg => msg.aiMeta?.category === filters.category);
-              }
-              if (filters.priority && filters.priority !== 'All') {
-                filteredMessages = filteredMessages.filter(msg => msg.aiMeta?.priority === filters.priority);
-              }
-              if (filters.sentiment && filters.sentiment !== 'All') {
-                filteredMessages = filteredMessages.filter(msg => msg.aiMeta?.sentiment === filters.sentiment);
-              }
-              
-              // Paginate the filtered results
-              const startIndex = (page - 1) * 20;
-              messages = filteredMessages.slice(startIndex, startIndex + 20);
+              // Check if there are more messages by getting one extra message
+              const nextPageMessages = await emailService.getFolderMessages(userId, email, folderId, page + 1, 1, filters);
+              hasMore = nextPageMessages.length > 0;
             }
             
-            // Check if there are more messages in Outlook
-            hasMore = !!newNextLink;
+            // Also check if there are more messages in Outlook
+            hasMore = hasMore || !!newNextLink;
           }
         }
         

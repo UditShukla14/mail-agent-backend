@@ -84,7 +84,16 @@ class EmailService {
                 subject: msg.subject || '(No Subject)',
                 content: msg.content || '',
                 preview: msg.preview || '',
-                timestamp: msg.timestamp || new Date(),
+                timestamp: (() => {
+                  if (msg.timestamp && msg.timestamp !== '') {
+                    const receivedTime = new Date(msg.timestamp);
+                    console.log(`📧 Email timestamp from Outlook: ${msg.timestamp} -> ${receivedTime.toISOString()}`);
+                    return receivedTime;
+                  } else {
+                    console.log(`⚠️ Missing timestamp for email ${msg.id}, using current time`);
+                    return new Date();
+                  }
+                })(),
                 read: msg.read || false,
                 folder: folderId,
                 important: msg.important || false,
