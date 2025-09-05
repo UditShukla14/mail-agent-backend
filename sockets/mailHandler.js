@@ -16,7 +16,7 @@ class MailHandler {
       console.log(`Retrieved ${messages.length} messages from folder ${folderId}`);
       
       // Check if there are more messages to load
-              const totalCount = await emailService.getFolderMessageCount(worxstreamUserId, email, folderId);
+      const totalCount = await emailService.getFolderMessageCount(worxstreamUserId, email, folderId, filters);
       const hasMore = totalCount > page * pageSize;
       
       // Emit messages immediately

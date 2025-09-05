@@ -15,20 +15,6 @@ class EmailService {
 
       console.log(`🔄 Getting folder messages for ${email} in folder ${folderId} with filters:`, filters);
 
-      const token = await getToken(worxstreamUserId, email, 'outlook');
-      if (!token) {
-        console.error(`❌ Token not found for ${email}`);
-        throw new Error('Token not found');
-      }
-
-      const skip = (page - 1) * pageSize;
-      const { messages } = await getMessagesByFolder(token, folderId, null, pageSize);
-
-      if (!messages || messages.length === 0) {
-        console.log('📭 No messages found in folder');
-        return [];
-      }
-
       // Get user from database
       const user = await User.findOne({ worxstreamUserId });
       if (!user) {
@@ -36,102 +22,173 @@ class EmailService {
         throw new Error('User not found');
       }
 
-      console.log(`💾 Saving ${messages.length} messages to database`);
+      // Build database query with filters
+      const query = {
+        userId: user._id,
+        email: email,
+        folder: folderId
+      };
 
-      // Store messages in database with user reference
-      const savedMessages = await Promise.all(messages.map(async msg => {
-        try {
-          // Ensure all required fields are present
-          const emailData = {
-            id: msg.id,
-            userId: user._id,
-            email: email,
-            from: msg.from || '',
-            to: msg.to || '',
-            cc: msg.cc || '',
-            bcc: msg.bcc || '',
-            subject: msg.subject || '(No Subject)',
-            content: msg.content || '',
-            preview: msg.preview || '',
-            timestamp: msg.timestamp || new Date(),
-            read: msg.read || false,
-            folder: folderId,
-            important: msg.important || false,
-            flagged: msg.flagged || false,
-            isProcessed: false,
-            updatedAt: new Date()
-          };
-
-          // Validate required fields before saving
-          if (!emailData.id || !emailData.userId || !emailData.email) {
-            console.error('❌ Message missing required fields:', {
-              id: emailData.id,
-              hasUserId: !!emailData.userId,
-              email: emailData.email
-            });
-            return null;
-          }
-
-          // Check if this email should be assigned to a focus folder
-          let focusFolder = null;
-          try {
-            focusFolder = await focusAssignmentService.assignFocusFolder(
-              emailData, 
-              user._id, 
-              email
-            );
-          } catch (error) {
-            console.error('⚠️ Error assigning focus folder:', error);
-            // Continue without focus folder assignment
-          }
-          
-          // Add focus folder to email data if assigned
-          if (focusFolder) {
-            emailData.focusFolder = focusFolder;
-          }
-          
-          const savedMsg = await Email.findOneAndUpdate(
-            { id: msg.id, email: email },
-            { $set: emailData },
-            { 
-              upsert: true, 
-              new: true,
-              setDefaultsOnInsert: true
-            }
-          );
-
-          console.log(`✅ Saved message ${msg.id}`);
-          return savedMsg;
-        } catch (error) {
-          console.error(`❌ Failed to save message ${msg.id}:`, error);
-          return null;
-        }
-      }));
-
-      const validMessages = savedMessages.filter(Boolean);
-      console.log(`✅ Successfully saved ${validMessages.length} messages`);
-
-      // Apply filters to the saved messages if any filters are provided
-      if (Object.keys(filters).length > 0) {
-        const filteredMessages = this.applyFilters(validMessages, filters);
-        console.log(`🔍 Applied filters, ${filteredMessages.length} messages match criteria`);
-        return filteredMessages;
+      // Add AI metadata filters if provided
+      if (filters.category && filters.category !== 'All') {
+        query['aiMeta.category'] = filters.category;
+      }
+      if (filters.priority && filters.priority !== 'All') {
+        query['aiMeta.priority'] = filters.priority;
+      }
+      if (filters.sentiment && filters.sentiment !== 'All') {
+        query['aiMeta.sentiment'] = filters.sentiment;
       }
 
-      return validMessages;
+      console.log('🔍 Database query:', query);
+
+      // Calculate pagination
+      const skip = (page - 1) * pageSize;
+
+      // Query emails directly from database with filters
+      const messages = await Email.find(query)
+        .sort({ timestamp: -1 })
+        .skip(skip)
+        .limit(pageSize)
+        .select('-content'); // Exclude content for performance
+
+      console.log(`📧 Found ${messages.length} messages in database matching filters`);
+
+      // If no messages found in database, try to fetch from Outlook and save them
+      if (messages.length === 0 && page === 1) {
+        console.log('📥 No messages in database, fetching from Outlook...');
+        
+        const token = await getToken(worxstreamUserId, email, 'outlook');
+        if (!token) {
+          console.error(`❌ Token not found for ${email}`);
+          throw new Error('Token not found');
+        }
+
+        const { messages: outlookMessages } = await getMessagesByFolder(token, folderId, null, pageSize);
+
+        if (outlookMessages && outlookMessages.length > 0) {
+          console.log(`💾 Saving ${outlookMessages.length} messages to database`);
+
+          // Store messages in database with user reference
+          const savedMessages = await Promise.all(outlookMessages.map(async msg => {
+            try {
+              // Ensure all required fields are present
+              const emailData = {
+                id: msg.id,
+                userId: user._id,
+                email: email,
+                from: msg.from || '',
+                to: msg.to || '',
+                cc: msg.cc || '',
+                bcc: msg.bcc || '',
+                subject: msg.subject || '(No Subject)',
+                content: msg.content || '',
+                preview: msg.preview || '',
+                timestamp: msg.timestamp || new Date(),
+                read: msg.read || false,
+                folder: folderId,
+                important: msg.important || false,
+                flagged: msg.flagged || false,
+                isProcessed: false,
+                updatedAt: new Date()
+              };
+
+              // Validate required fields before saving
+              if (!emailData.id || !emailData.userId || !emailData.email) {
+                console.error('❌ Message missing required fields:', {
+                  id: emailData.id,
+                  hasUserId: !!emailData.userId,
+                  email: emailData.email
+                });
+                return null;
+              }
+
+              // Check if this email should be assigned to a focus folder
+              let focusFolder = null;
+              try {
+                focusFolder = await focusAssignmentService.assignFocusFolder(
+                  emailData, 
+                  user._id, 
+                  email
+                );
+              } catch (error) {
+                console.error('⚠️ Error assigning focus folder:', error);
+                // Continue without focus folder assignment
+              }
+              
+              // Add focus folder to email data if assigned
+              if (focusFolder) {
+                emailData.focusFolder = focusFolder;
+              }
+              
+              const savedMsg = await Email.findOneAndUpdate(
+                { id: msg.id, email: email },
+                { $set: emailData },
+                { 
+                  upsert: true, 
+                  new: true,
+                  setDefaultsOnInsert: true
+                }
+              );
+
+              console.log(`✅ Saved message ${msg.id}`);
+              return savedMsg;
+            } catch (error) {
+              console.error(`❌ Failed to save message ${msg.id}:`, error);
+              return null;
+            }
+          }));
+
+          const validMessages = savedMessages.filter(Boolean);
+          console.log(`✅ Successfully saved ${validMessages.length} messages`);
+
+          // Apply filters to the saved messages if any filters are provided
+          if (Object.keys(filters).length > 0) {
+            const filteredMessages = this.applyFilters(validMessages, filters);
+            console.log(`🔍 Applied filters, ${filteredMessages.length} messages match criteria`);
+            return filteredMessages;
+          }
+
+          return validMessages;
+        }
+      }
+
+      return messages;
     } catch (error) {
       console.error('❌ Error getting folder messages:', error);
       throw error;
     }
   }
 
-  async getFolderMessageCount(worxstreamUserId, email, folderId) {
+  async getFolderMessageCount(worxstreamUserId, email, folderId, filters = {}) {
     try {
-      const token = await getToken(worxstreamUserId, email, 'outlook');
-      if (!token) throw new Error('Token not found');
+      // Get user from database
+      const user = await User.findOne({ worxstreamUserId });
+      if (!user) {
+        console.error(`❌ User not found for worxstreamUserId: ${worxstreamUserId}`);
+        throw new Error('User not found');
+      }
 
-      // Get total count from database
-      const count = await Email.countDocuments({ folder: folderId });
+      // Build database query with filters
+      const query = {
+        userId: user._id,
+        email: email,
+        folder: folderId
+      };
+
+      // Add AI metadata filters if provided
+      if (filters.category && filters.category !== 'All') {
+        query['aiMeta.category'] = filters.category;
+      }
+      if (filters.priority && filters.priority !== 'All') {
+        query['aiMeta.priority'] = filters.priority;
+      }
+      if (filters.sentiment && filters.sentiment !== 'All') {
+        query['aiMeta.sentiment'] = filters.sentiment;
+      }
+
+      // Get total count from database with filters
+      const count = await Email.countDocuments(query);
       return count;
     } catch (error) {
       console.error('Error getting folder message count:', error);
