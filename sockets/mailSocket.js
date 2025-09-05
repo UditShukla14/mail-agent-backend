@@ -216,8 +216,10 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 📁 Load paginated folder messages
-      socket.on('mail:getFolder', async ({ worxstreamUserId, email, folderId, page = 1 }) => {
-    const debounceKey = `getFolder:${worxstreamUserId}:${email}:${folderId}:${page}`;
+      socket.on('mail:getFolder', async ({ worxstreamUserId, email, folderId, page = 1, filters = {} }) => {
+    console.log('📨 Received mail:getFolder event with filters:', { worxstreamUserId, email, folderId, page, filters });
+    
+    const debounceKey = `getFolder:${worxstreamUserId}:${email}:${folderId}:${page}:${JSON.stringify(filters)}`;
     
     debounce(debounceKey, async () => {
       try {
@@ -225,121 +227,34 @@ export const initMailSocket = (socket, io) => {
         // Ensure we use the correct type (Number) for worxstreamUserId
         const userId = Number(socket.user?.id || worxstreamUserId);
         
-        const token = await getToken(userId, email, 'outlook');
-        if (!token) {
-          // Check if user has any connected accounts
-          const userTokens = await getUserTokens(userId);
-          if (userTokens.length === 0) {
-            return socket.emit('mail:error', 'No email accounts connected. Please connect your email account first.');
-          } else {
-            return socket.emit('mail:error', `Email account ${email} is not connected or has expired. Available accounts: ${userTokens.map(t => t.email).join(', ')}`);
-          }
-        }
+        console.log('🔍 Using emailService for filtered results');
+        
+        // Use the emailService which supports filtering
+        const messages = await emailService.getFolderMessages(userId, email, folderId, page, 20, filters);
+        
+        // Get total count with filters for pagination
+        const totalCount = await emailService.getFolderMessageCount(userId, email, folderId, filters);
+        const hasMore = totalCount > page * 20;
+        
+        console.log(`📧 Found ${messages.length} messages matching filters, total: ${totalCount}`);
 
-        const key = `${socket.id}-${folderId}`;
-        if (page === 1) folderPaginationMap.delete(key);
-        const nextLink = page === 1 ? null : folderPaginationMap.get(key);
+        // Emit messages immediately with database IDs
+        const messagesWithDbId = messages.map(msg => ({
+          ...msg.toObject(),
+          dbId: msg._id.toString() // Include the MongoDB ObjectId as dbId
+        }));
+        
+        socket.emit('mail:folderMessages', {
+          folderId,
+          page,
+          messages: messagesWithDbId,
+          nextLink: hasMore ? `page=${page + 1}` : null
+        });
 
-        const { messages, nextLink: newNextLink } = await getMessagesByFolder(token, folderId, nextLink);
-        if (newNextLink) folderPaginationMap.set(key, newNextLink);
-
-        // Get user from database using the authenticated user's ID
-        const user = await User.findOne({ worxstreamUserId: userId });
-        if (!user) {
-          socket.emit('mail:error', 'User not found');
-          return;
-        }
-
-      // Process messages efficiently
-      const savedMessages = await Promise.all(messages.map(async msg => {
-        try {
-          // First check if message exists and get its current state
-          const existingMessage = await Email.findOne({ id: msg.id, email: email });
-          
-          // If message exists and hasn't changed, return it
-          if (existingMessage && 
-              existingMessage.subject === (msg.subject || '(No Subject)') &&
-              existingMessage.from === (msg.from || '') &&
-              existingMessage.to === (msg.to || '') &&
-              existingMessage.cc === (msg.cc || '') &&
-              existingMessage.bcc === (msg.bcc || '') &&
-              existingMessage.preview === (msg.preview || '') &&
-              existingMessage.read === (msg.read || false) &&
-              existingMessage.important === (msg.important || false) &&
-              existingMessage.flagged === (msg.flagged || false)) {
-            return existingMessage;
-          }
-
-          // Message is new or has changed, prepare update data
-          const emailData = {
-            id: msg.id,
-            userId: user._id,
-            email: email,
-            from: msg.from || '',
-            to: msg.to || '',
-            cc: msg.cc || '',
-            bcc: msg.bcc || '',
-            subject: msg.subject || '(No Subject)',
-            content: msg.content || '',
-            preview: msg.preview || '',
-            timestamp: msg.timestamp || new Date(),
-            read: msg.read || false,
-            folder: folderId,
-            important: msg.important || false,
-            flagged: msg.flagged || false,
-            isProcessed: existingMessage?.isProcessed || false,
-            updatedAt: new Date()
-          };
-
-          // Validate required fields
-          if (!emailData.id || !emailData.userId || !emailData.email) {
-            console.error('❌ Message missing required fields:', {
-              id: emailData.id,
-              hasUserId: !!emailData.userId,
-              email: emailData.email
-            });
-            return null;
-          }
-
-          // Only update if message is new or has changed
-          const savedMsg = await Email.findOneAndUpdate(
-            { id: msg.id, email: email },
-            { $set: emailData },
-            { 
-              upsert: true, 
-              new: true,
-              setDefaultsOnInsert: true
-            }
-          );
-
-          return savedMsg;
-        } catch (error) {
-          console.error(`❌ Failed to save message ${msg.id}:`, error);
-          return null;
-        }
-      }));
-
-      const validMessages = savedMessages.filter(Boolean);
-
-      // Emit messages immediately with database IDs
-      const messagesWithDbId = validMessages.map(msg => ({
-        ...msg.toObject(),
-        dbId: msg._id.toString() // Include the MongoDB ObjectId as dbId
-      }));
-      
-      socket.emit('mail:folderMessages', {
-        folderId,
-        page,
-        messages: messagesWithDbId,
-        nextLink: newNextLink
-      });
-
-      // Remove automatic enrichment for all messages
-      // Enrichment will now only happen when specifically requested from enriched email list
-    } catch (error) {
-      console.error('❌ Error in mail:getFolder:', error);
-      socket.emit('mail:error', 'Failed to process folder request');
-    }
+      } catch (error) {
+        console.error('❌ Error in mail:getFolder:', error);
+        socket.emit('mail:error', 'Failed to process folder request');
+      }
     });
   });
 
