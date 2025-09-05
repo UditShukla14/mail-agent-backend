@@ -217,16 +217,154 @@ export const initMailSocket = (socket, io) => {
         // Ensure we use the correct type (Number) for worxstreamUserId
         const userId = Number(socket.user?.id || worxstreamUserId);
         
-        console.log('🔍 Using emailService for filtered results');
+        console.log('🔍 Loading emails with filters:', filters);
         
-        // Use the emailService which supports filtering
-        const messages = await emailService.getFolderMessages(userId, email, folderId, page, 20, filters);
+        // For page 1, try to get messages from database with filters first
+        let messages = [];
+        let hasMore = false;
         
-        // Get total count with filters for pagination
-        const totalCount = await emailService.getFolderMessageCount(userId, email, folderId, filters);
-        const hasMore = totalCount > page * 20;
+        if (page === 1) {
+          // First page: try database with filters, then fetch from Outlook if needed
+          messages = await emailService.getFolderMessages(userId, email, folderId, page, 20, filters);
+          
+          // If we don't have enough messages in database, fetch from Outlook
+          if (messages.length < 20) {
+            console.log('📥 Not enough messages in database, fetching from Outlook...');
+            
+            const token = await getToken(userId, email, 'outlook');
+            if (token) {
+              const key = `${socket.id}-${folderId}`;
+              const nextLink = folderPaginationMap.get(key);
+              
+              const { messages: outlookMessages, nextLink: newNextLink } = await getMessagesByFolder(token, folderId, nextLink);
+              if (newNextLink) folderPaginationMap.set(key, newNextLink);
+              
+              // Get user from database
+              const user = await User.findOne({ worxstreamUserId: userId });
+              if (user) {
+                // Save new messages to database
+                const savedMessages = await Promise.all(outlookMessages.map(async msg => {
+                  try {
+                    const emailData = {
+                      id: msg.id,
+                      userId: user._id,
+                      email: email,
+                      from: msg.from || '',
+                      to: msg.to || '',
+                      cc: msg.cc || '',
+                      bcc: msg.bcc || '',
+                      subject: msg.subject || '(No Subject)',
+                      content: msg.content || '',
+                      preview: msg.preview || '',
+                      timestamp: msg.timestamp || new Date(),
+                      read: msg.read || false,
+                      folder: folderId,
+                      important: msg.important || false,
+                      flagged: msg.flagged || false,
+                      isProcessed: false,
+                      updatedAt: new Date()
+                    };
+
+                    const savedMsg = await Email.findOneAndUpdate(
+                      { id: msg.id, email: email },
+                      { $set: emailData },
+                      { upsert: true, new: true, setDefaultsOnInsert: true }
+                    );
+                    return savedMsg;
+                  } catch (error) {
+                    console.error(`❌ Failed to save message ${msg.id}:`, error);
+                    return null;
+                  }
+                }));
+
+                // Now get the filtered messages from database (including newly saved ones)
+                messages = await emailService.getFolderMessages(userId, email, folderId, page, 20, filters);
+              }
+              
+              // Check if there are more messages in Outlook
+              hasMore = !!newNextLink;
+            }
+          } else {
+            // We have enough messages from database, check if there are more
+            const totalCount = await emailService.getFolderMessageCount(userId, email, folderId, filters);
+            hasMore = totalCount > page * 20;
+          }
+        } else {
+          // Load more: fetch from Outlook API without filters
+          console.log('📥 Load more: fetching from Outlook API...');
+          
+          const token = await getToken(userId, email, 'outlook');
+          if (token) {
+            const key = `${socket.id}-${folderId}`;
+            const nextLink = folderPaginationMap.get(key);
+            
+            const { messages: outlookMessages, nextLink: newNextLink } = await getMessagesByFolder(token, folderId, nextLink);
+            if (newNextLink) folderPaginationMap.set(key, newNextLink);
+            
+            // Get user from database
+            const user = await User.findOne({ worxstreamUserId: userId });
+            if (user) {
+              // Save new messages to database
+              const savedMessages = await Promise.all(outlookMessages.map(async msg => {
+                try {
+                  const emailData = {
+                    id: msg.id,
+                    userId: user._id,
+                    email: email,
+                    from: msg.from || '',
+                    to: msg.to || '',
+                    cc: msg.cc || '',
+                    bcc: msg.bcc || '',
+                    subject: msg.subject || '(No Subject)',
+                    content: msg.content || '',
+                    preview: msg.preview || '',
+                    timestamp: msg.timestamp || new Date(),
+                    read: msg.read || false,
+                    folder: folderId,
+                    important: msg.important || false,
+                    flagged: msg.flagged || false,
+                    isProcessed: false,
+                    updatedAt: new Date()
+                  };
+
+                  const savedMsg = await Email.findOneAndUpdate(
+                    { id: msg.id, email: email },
+                    { $set: emailData },
+                    { upsert: true, new: true, setDefaultsOnInsert: true }
+                  );
+                  return savedMsg;
+                } catch (error) {
+                  console.error(`❌ Failed to save message ${msg.id}:`, error);
+                  return null;
+                }
+              }));
+
+              // Get all messages from database and apply filters on frontend
+              const allMessages = await emailService.getFolderMessages(userId, email, folderId, 1, 1000, {}); // Get all messages
+              
+              // Apply filters on frontend
+              let filteredMessages = allMessages;
+              if (filters.category && filters.category !== 'All') {
+                filteredMessages = filteredMessages.filter(msg => msg.aiMeta?.category === filters.category);
+              }
+              if (filters.priority && filters.priority !== 'All') {
+                filteredMessages = filteredMessages.filter(msg => msg.aiMeta?.priority === filters.priority);
+              }
+              if (filters.sentiment && filters.sentiment !== 'All') {
+                filteredMessages = filteredMessages.filter(msg => msg.aiMeta?.sentiment === filters.sentiment);
+              }
+              
+              // Paginate the filtered results
+              const startIndex = (page - 1) * 20;
+              messages = filteredMessages.slice(startIndex, startIndex + 20);
+            }
+            
+            // Check if there are more messages in Outlook
+            hasMore = !!newNextLink;
+          }
+        }
         
-        console.log(`📧 Found ${messages.length} messages matching filters, total: ${totalCount}`);
+        console.log(`📧 Found ${messages.length} messages, hasMore: ${hasMore}`);
 
         // Emit messages immediately with database IDs
         const messagesWithDbId = messages.map(msg => ({
