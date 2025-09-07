@@ -30,7 +30,6 @@ export const getEmailCategories = async (req, res) => {
       });
     }
 
-    console.log('🎯 Target email and worxstreamUserId:', { targetEmail, worxstreamUserId });
 
     // Get user
     const user = await User.findOne({ worxstreamUserId });
@@ -42,7 +41,6 @@ export const getEmailCategories = async (req, res) => {
       });
     }
 
-    console.log('✅ User found:', user._id);
 
     // Get or create email account
     let emailAccount = await EmailAccount.findOne({ 
@@ -50,10 +48,8 @@ export const getEmailCategories = async (req, res) => {
       email: targetEmail 
     });
 
-    console.log('📧 Email account lookup result:', emailAccount ? 'Found' : 'Not found');
 
     if (!emailAccount) {
-      console.log('🆕 Creating new email account for:', targetEmail);
       // Create new email account without categories - user must set them up
       emailAccount = new EmailAccount({
         userId: user._id,
@@ -62,10 +58,8 @@ export const getEmailCategories = async (req, res) => {
         // categories will be empty - user must select them
       });
       await emailAccount.save();
-      console.log('✅ New email account created with ID:', emailAccount._id);
     }
 
-    console.log('📋 Returning categories:', emailAccount.categories.length, 'categories');
     res.json({
       success: true,
       data: emailAccount.categories
@@ -91,7 +85,6 @@ export const updateEmailCategories = async (req, res) => {
     const { email: queryEmail, categories } = req.body;
     const worxstreamUserId = req.user.id;
 
-    console.log('🔧 Backend: Extracted data:', { queryEmail, categories, worxstreamUserId });
 
     if (!worxstreamUserId) {
       console.error('❌ Backend: No worXstream user ID found');
@@ -111,7 +104,6 @@ export const updateEmailCategories = async (req, res) => {
       });
     }
 
-    console.log('🔧 Backend: Looking up user with worxstreamUserId:', worxstreamUserId);
 
     // Get user
     const user = await User.findOne({ worxstreamUserId });
@@ -123,7 +115,6 @@ export const updateEmailCategories = async (req, res) => {
       });
     }
 
-    console.log('🔧 Backend: User found:', user._id);
 
     // Get or create email account
     let emailAccount = await EmailAccount.findOne({ 
@@ -131,10 +122,8 @@ export const updateEmailCategories = async (req, res) => {
       email: targetEmail 
     });
 
-    console.log('🔧 Backend: Email account lookup result:', emailAccount ? 'Found' : 'Not found');
 
     if (!emailAccount) {
-      console.log('🔧 Backend: Creating new email account for:', targetEmail);
       emailAccount = new EmailAccount({
         userId: user._id,
         email: targetEmail,
@@ -144,11 +133,9 @@ export const updateEmailCategories = async (req, res) => {
     }
 
     // Update categories
-    console.log('🔧 Backend: Updating categories:', categories);
     emailAccount.categories = categories;
     await emailAccount.save();
 
-    console.log('🔧 Backend: Categories updated successfully');
 
     res.json({ 
       success: true,

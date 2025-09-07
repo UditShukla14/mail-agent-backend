@@ -16,31 +16,17 @@ export const getToken = async (worxstreamUserId, email, provider) => {
   try {
     // Ensure worxstreamUserId is a number
     const numericUserId = Number(worxstreamUserId);
-    console.log('🔍 Debug: getToken called with:', { 
-      originalWorxstreamUserId: worxstreamUserId, 
-      numericUserId: numericUserId,
-      email, 
-      provider 
-    });
     
     const cacheKey = `${numericUserId}:${email}:${provider}`;
     const cached = tokenCache.get(cacheKey);
     
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      console.log('🔍 Debug: Returning cached token for:', cacheKey);
       return cached.token;
     }
 
     const tokenDoc = await Token.findOne({ worxstreamUserId: numericUserId, email, provider });
-    console.log('🔍 Debug: Token lookup result:', { 
-      found: !!tokenDoc, 
-      tokenId: tokenDoc?._id,
-      hasAccessToken: !!tokenDoc?.access_token,
-      hasRefreshToken: !!tokenDoc?.refresh_token
-    });
     
     if (!tokenDoc) {
-      console.log('🔍 Debug: No token document found');
       return null;
     }
 
@@ -72,11 +58,9 @@ export const getToken = async (worxstreamUserId, email, provider) => {
         token: access_token,
         timestamp: Date.now()
       });
-      console.log('🔍 Debug: Using valid cached token for:', email);
       return access_token;
     }
 
-    console.log('🔍 Debug: Token expired, attempting refresh for:', email);
     const refreshed = await refreshToken(refresh_token, provider);
     if (refreshed) {
       tokenDoc.access_token = refreshed.access_token;
@@ -100,7 +84,6 @@ export const getToken = async (worxstreamUserId, email, provider) => {
         { email, provider },
         { isExpired: true }
       );
-      console.log(`⚠️ Marked ${email} as expired in EmailAccount due to refresh failure`);
     } catch (emailAccountError) {
       console.error(`❌ Failed to update EmailAccount for ${email}:`, emailAccountError);
     }
@@ -115,7 +98,6 @@ export const getToken = async (worxstreamUserId, email, provider) => {
 // 💾 Save token (no encryption needed since we're using worXstream auth)
 export const saveToken = async (worxstreamUserId, email, tokenResponse, provider) => {
   try {
-    console.log(`🔄 Saving token for ${email} (${provider}) with worxstreamUserId: ${worxstreamUserId}`);
     const { access_token, refresh_token, expires_in } = tokenResponse;
 
     if (!access_token || !refresh_token) {
@@ -134,11 +116,9 @@ export const saveToken = async (worxstreamUserId, email, tokenResponse, provider
       { upsert: true, new: true }
     );
 
-    console.log(`✅ Token saved with ID: ${tokenDoc._id}`);
     
     // Create or update EmailAccount record
     try {
-      console.log(`🔄 Creating/updating EmailAccount record for ${email}`);
       
       // Find the user to get their MongoDB _id
       const user = await User.findOne({ worxstreamUserId });
@@ -159,7 +139,6 @@ export const saveToken = async (worxstreamUserId, email, tokenResponse, provider
         { upsert: true, new: true }
       );
       
-      console.log(`✅ EmailAccount record created/updated with ID: ${emailAccount._id}`);
     } catch (emailAccountError) {
       console.error(`❌ Failed to create EmailAccount record for ${email}:`, emailAccountError);
       // Don't fail the entire token save process if EmailAccount creation fails
@@ -176,7 +155,6 @@ export const saveToken = async (worxstreamUserId, email, tokenResponse, provider
       throw new Error('Token verification failed after save');
     }
     
-    console.log(`✅ Token verified for ${email}`);
     return true;
   } catch (err) {
     console.error(`❌ Failed to save token for ${email}:`, err);
@@ -187,7 +165,6 @@ export const saveToken = async (worxstreamUserId, email, tokenResponse, provider
 // 🔁 Refresh token using provider-specific logic
 export const refreshToken = async (refresh_token, provider) => {
   try {
-    console.log(`🔄 Starting token refresh for provider: ${provider}`);
     
     let url, data;
 
@@ -210,7 +187,6 @@ export const refreshToken = async (refresh_token, provider) => {
       });
     }
 
-    console.log(`🔄 Making refresh request to: ${url}`);
     const res = await axios.post(url, data, {
       headers: { "Content-Type": "application/x-www-form-urlencoded" }
     });
@@ -242,7 +218,6 @@ export const refreshToken = async (refresh_token, provider) => {
     if (err.response?.status === 400 || err.response?.status === 401) {
       const errorData = err.response?.data;
       if (errorData?.error === 'invalid_grant' || errorData?.error_description?.includes('refresh')) {
-        console.log(`🔴 Refresh token is invalid for ${provider}, user needs to re-authenticate`);
         // The user will need to re-authenticate to get a new refresh token
       }
     }
@@ -256,15 +231,12 @@ export const deleteToken = async (worxstreamUserId, email, provider) => {
   try {
     // Ensure worxstreamUserId is a number
     const numericUserId = Number(worxstreamUserId);
-    console.log(`🔄 Deleting token for ${email} (${provider}) with worxstreamUserId: ${worxstreamUserId} (converted to: ${numericUserId})`);
     
     const result = await Token.deleteOne({ worxstreamUserId: numericUserId, email, provider });
     
     if (result.deletedCount > 0) {
-      console.log(`✅ Token deleted for ${email}`);
       return true;
     } else {
-      console.log(`❌ No token found to delete for ${email}`);
       return false;
     }
   } catch (err) {
@@ -286,7 +258,6 @@ export const getUserTokens = async (worxstreamUserId) => {
       const isExpired = Date.now() > token.timestamp + token.expires_in * 1000 - 60000;
       
       if (isExpired) {
-        console.log(`🔄 Token for ${token.email} is expired, attempting refresh...`);
         // Try to refresh the token
         const refreshed = await refreshToken(token.refresh_token, token.provider);
         
@@ -298,7 +269,6 @@ export const getUserTokens = async (worxstreamUserId) => {
           token.timestamp = refreshed.timestamp;
           await token.save();
           
-          console.log(`✅ Successfully refreshed token for ${token.email}`);
           
           refreshedTokens.push({
             email: token.email,
@@ -308,7 +278,6 @@ export const getUserTokens = async (worxstreamUserId) => {
             isExpired: false // Token is now fresh
           });
         } else {
-          console.log(`❌ Failed to refresh token for ${token.email}`);
           refreshedTokens.push({
             email: token.email,
             provider: token.provider,
@@ -339,19 +308,16 @@ export const getUserTokens = async (worxstreamUserId) => {
 // Clear token cache (useful for testing or when tokens are updated)
 export const clearTokenCache = () => {
   tokenCache.clear();
-  console.log('🗑️ Token cache cleared');
 };
 
 // 🔄 Manually refresh a specific token
 export const refreshSpecificToken = async (worxstreamUserId, email, provider) => {
   try {
-    console.log(`🔄 Manually refreshing token for ${email} (${provider})`);
     
     const numericUserId = Number(worxstreamUserId);
     const tokenDoc = await Token.findOne({ worxstreamUserId: numericUserId, email, provider });
     
     if (!tokenDoc) {
-      console.log(`❌ No token found for ${email}`);
       return false;
     }
     
@@ -367,10 +333,8 @@ export const refreshSpecificToken = async (worxstreamUserId, email, provider) =>
       const cacheKey = `${numericUserId}:${email}:${provider}`;
       tokenCache.delete(cacheKey);
       
-      console.log(`✅ Successfully refreshed token for ${email}`);
       return true;
     } else {
-      console.log(`❌ Failed to refresh token for ${email}`);
       return false;
     }
   } catch (err) {

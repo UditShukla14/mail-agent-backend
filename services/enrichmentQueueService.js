@@ -7,12 +7,76 @@ class EnrichmentQueueService {
   constructor() {
     this.queue = [];
     this.processing = false;
-    this.batchSize = 5; // Consistent with other services
-    this.rateLimitDelay = 60000; // 1 minute delay between batches
+    this.batchSize = 10; // Increased batch size for better throughput
+    this.rateLimitDelay = 30000; // Reduced to 30 seconds between batches
     this.maxRetries = 3;
     this.currentTokens = 0;
-    this.maxTokensPerMinute = 1000; // Assuming a default maxTokensPerMinute
+    this.maxTokensPerMinute = 1000; // Claude API limit
+    this.maxRequestsPerMinute = 1000; // Claude API limit
     this.processingEmails = new Set(); // Track emails currently being processed
+    this.tokenUsageHistory = []; // Track token usage over time
+    this.requestHistory = []; // Track request count over time
+    this.lastResetTime = Date.now();
+  }
+
+  // Check if we can process more requests without hitting limits
+  canProcessBatch() {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60000;
+    
+    // Clean old history entries
+    this.tokenUsageHistory = this.tokenUsageHistory.filter(entry => entry.timestamp > oneMinuteAgo);
+    this.requestHistory = this.requestHistory.filter(entry => entry.timestamp > oneMinuteAgo);
+    
+    // Check token limit
+    const currentTokens = this.tokenUsageHistory.reduce((sum, entry) => sum + entry.tokens, 0);
+    const currentRequests = this.requestHistory.length;
+    
+    // Estimate tokens for next batch (rough estimate: 1000 tokens per email)
+    const estimatedTokens = this.batchSize * 1000;
+    
+    return currentTokens + estimatedTokens <= this.maxTokensPerMinute && 
+           currentRequests + 1 <= this.maxRequestsPerMinute;
+  }
+
+  // Record token usage
+  recordTokenUsage(tokens) {
+    this.tokenUsageHistory.push({
+      timestamp: Date.now(),
+      tokens: tokens
+    });
+  }
+
+  // Record request
+  recordRequest() {
+    this.requestHistory.push({
+      timestamp: Date.now()
+    });
+  }
+
+  // Calculate dynamic delay based on current usage
+  getDynamicDelay() {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60000;
+    
+    const recentTokens = this.tokenUsageHistory
+      .filter(entry => entry.timestamp > oneMinuteAgo)
+      .reduce((sum, entry) => sum + entry.tokens, 0);
+    
+    const recentRequests = this.requestHistory
+      .filter(entry => entry.timestamp > oneMinuteAgo).length;
+    
+    // If we're close to limits, increase delay
+    const tokenUsageRatio = recentTokens / this.maxTokensPerMinute;
+    const requestUsageRatio = recentRequests / this.maxRequestsPerMinute;
+    
+    if (tokenUsageRatio > 0.8 || requestUsageRatio > 0.8) {
+      return 120000; // 2 minutes if close to limit
+    } else if (tokenUsageRatio > 0.5 || requestUsageRatio > 0.5) {
+      return 60000; // 1 minute if moderate usage
+    } else {
+      return 30000; // 30 seconds if low usage
+    }
   }
 
   async addToQueue(emails, socket = null) {
@@ -111,18 +175,30 @@ class EnrichmentQueueService {
 
     try {
       while (this.queue.length > 0) {
+        // Check if we can process without hitting limits
+        if (!this.canProcessBatch()) {
+          const delay = this.getDynamicDelay();
+          console.log(`⏳ Rate limit reached, waiting ${delay/1000} seconds before next batch`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
         const queueItem = this.queue.splice(0, 1)[0]; // Take one item at a time
         console.log(`📧 Processing queue item with ${queueItem.emails.length} emails`);
+        
+        // Record this request
+        this.recordRequest();
         
         await this.processBatch(queueItem.emails, queueItem.socket);
         
         // Clear processing state for this batch
         queueItem.emails.forEach(email => this.processingEmails.delete(email.id));
         
-        // Add delay between batches if there are more emails
+        // Add dynamic delay between batches if there are more emails
         if (this.queue.length > 0) {
-          console.log(`⏳ Waiting ${this.rateLimitDelay/1000} seconds before next batch`);
-          await new Promise(resolve => setTimeout(resolve, this.rateLimitDelay));
+          const delay = this.getDynamicDelay();
+          console.log(`⏳ Waiting ${delay/1000} seconds before next batch`);
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
       console.log('✅ Queue processing completed');
@@ -194,21 +270,12 @@ class EnrichmentQueueService {
         
         // Create emit callback function that uses the provided socket or falls back to finding the user's socket
         const emitCallback = (event, data) => {
-          console.log(`📡 EmitCallback called for event: ${event}`, data);
           try {
             // Use the provided socket if available, otherwise fall back to finding the user's socket
             const targetSocket = socket || (emailEnrichmentService.io ? emailEnrichmentService.findUserSocket(user.worxstreamUserId) : null);
             
             if (targetSocket) {
-              console.log(`📤 Emitting ${event} to socket ${targetSocket.id}`);
-              console.log(`📧 Socket details: connected=${targetSocket.connected}, worxstreamUserId=${targetSocket.worxstreamUserId}`);
-              console.log(`📧 Event data being sent:`, JSON.stringify(data, null, 2));
               targetSocket.emit(event, data);
-              console.log(`✅ Successfully emitted ${event} to socket ${targetSocket.id}`);
-            } else {
-              // Socket not found - this is normal when user is not on mail page
-              // Don't retry or broadcast - just log and continue
-              console.log(`📡 No socket available for ${event}, continuing processing...`);
             }
           } catch (error) {
             // Socket error - don't fail the enrichment process
@@ -218,6 +285,11 @@ class EnrichmentQueueService {
         
         // Process the entire batch using the rate-limited processor
         console.log(`📡 Calling processEnrichmentBatch with emitCallback for ${emailBatch.length} emails`);
+        
+        // Estimate and record token usage for this batch
+        const estimatedTokens = emailBatch.length * 1000; // Rough estimate
+        this.recordTokenUsage(estimatedTokens);
+        
         await processEnrichmentBatch(emailBatch, emitCallback);
         console.log(`✅ processEnrichmentBatch completed for ${emailBatch.length} emails`);
 

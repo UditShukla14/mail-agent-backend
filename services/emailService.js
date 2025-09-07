@@ -13,7 +13,6 @@ class EmailService {
         throw new Error('Missing required parameters');
       }
 
-      console.log(`🔄 Getting folder messages for ${email} in folder ${folderId} with filters:`, filters);
 
       // Get user from database
       const user = await User.findOne({ worxstreamUserId });
@@ -40,7 +39,6 @@ class EmailService {
         query['aiMeta.sentiment'] = filters.sentiment;
       }
 
-      console.log('🔍 Database query:', query);
 
       // Calculate pagination
       const skip = (page - 1) * pageSize;
@@ -52,11 +50,9 @@ class EmailService {
         .limit(pageSize)
         .select('-content'); // Exclude content for performance
 
-      console.log(`📧 Found ${messages.length} messages in database matching filters`);
 
       // If no messages found in database, try to fetch from Outlook and save them
       if (messages.length === 0 && page === 1) {
-        console.log('📥 No messages in database, fetching from Outlook...');
         
         const token = await getToken(worxstreamUserId, email, 'outlook');
         if (!token) {
@@ -67,7 +63,6 @@ class EmailService {
         const { messages: outlookMessages } = await getMessagesByFolder(token, folderId, null, pageSize);
 
         if (outlookMessages && outlookMessages.length > 0) {
-          console.log(`💾 Saving ${outlookMessages.length} messages to database`);
 
           // Store messages in database with user reference
           const savedMessages = await Promise.all(outlookMessages.map(async msg => {
@@ -87,10 +82,8 @@ class EmailService {
                 timestamp: (() => {
                   if (msg.timestamp && msg.timestamp !== '') {
                     const receivedTime = new Date(msg.timestamp);
-                    console.log(`📧 Email timestamp from Outlook: ${msg.timestamp} -> ${receivedTime.toISOString()}`);
                     return receivedTime;
                   } else {
-                    console.log(`⚠️ Missing timestamp for email ${msg.id}, using current time`);
                     return new Date();
                   }
                 })(),
@@ -140,7 +133,6 @@ class EmailService {
                 }
               );
 
-              console.log(`✅ Saved message ${msg.id}`);
               return savedMsg;
             } catch (error) {
               console.error(`❌ Failed to save message ${msg.id}:`, error);
@@ -149,12 +141,10 @@ class EmailService {
           }));
 
           const validMessages = savedMessages.filter(Boolean);
-          console.log(`✅ Successfully saved ${validMessages.length} messages`);
 
           // Apply filters to the saved messages if any filters are provided
           if (Object.keys(filters).length > 0) {
             const filteredMessages = this.applyFilters(validMessages, filters);
-            console.log(`🔍 Applied filters, ${filteredMessages.length} messages match criteria`);
             return filteredMessages;
           }
 
@@ -213,7 +203,6 @@ class EmailService {
         throw new Error('Missing required parameters');
       }
 
-      console.log(`🔄 Getting message ${messageId} for ${email}`);
 
       const token = await getToken(worxstreamUserId, email, 'outlook');
       if (!token) {
@@ -233,14 +222,11 @@ class EmailService {
       let aiMetadata = null;
       
       if (dbMessage) {
-        console.log(`📊 Found AI metadata in database for message ${messageId}`);
         aiMetadata = dbMessage.aiMeta;
       } else {
-        console.log(`📥 Message ${messageId} not found in DB, will fetch from Outlook only`);
       }
 
       // Always fetch fresh message data from Outlook (including attachments)
-      console.log(`📥 Fetching fresh message data from Outlook for ${messageId}`);
       const outlookMessage = await getMessageById(token, messageId);
       if (!outlookMessage) {
         console.error(`❌ Message ${messageId} not found in Outlook`);
@@ -250,12 +236,10 @@ class EmailService {
       // Process content to replace cid: URLs with data URLs for inline attachments
       let processedContent = outlookMessage.content;
       if (outlookMessage.attachments && outlookMessage.attachments.length > 0) {
-        console.log('Processing content to replace CID URLs with data URLs');
         outlookMessage.attachments.forEach((attachment) => {
           if (attachment.contentId && attachment.contentBytes) {
             const cidUrl = `cid:${attachment.contentId}`;
             const dataUrl = `data:${attachment.contentType};base64,${attachment.contentBytes}`;
-            console.log(`Replacing ${cidUrl} with data URL for ${attachment.name}`);
             
             // Use global replace to handle multiple occurrences
             const escapedCidUrl = cidUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -268,7 +252,6 @@ class EmailService {
       const cidRegex = /cid:([^"'\s>]+)/g;
       const remainingCids = processedContent.match(cidRegex);
       if (remainingCids) {
-        console.log('Removing remaining CID URLs to prevent browser errors:', remainingCids);
         processedContent = processedContent.replace(
           /<img[^>]*src=["']cid:[^"']*["'][^>]*>/gi,
           '<div style="color: #666; font-style: italic; padding: 10px; border: 1px dashed #ccc; margin: 10px 0;">[Inline image not available]</div>'
@@ -285,7 +268,6 @@ class EmailService {
 
       // If message doesn't exist in DB, save it with AI metadata
       if (!dbMessage) {
-        console.log(`💾 Saving new message ${messageId} to database`);
         
         // Check if this email should be assigned to a focus folder
         let focusFolder = null;
@@ -310,11 +292,8 @@ class EmailService {
         
         // Update the combined message with the new database ID
         combinedMessage.dbId = savedMessage._id.toString();
-        console.log(`💾 New message saved with database ID: ${combinedMessage.dbId}${focusFolder ? ` and focus folder: ${focusFolder}` : ''}`);
       }
 
-      console.log(`✅ Returning combined message with ${aiMetadata ? 'AI metadata' : 'no AI metadata'} and ${outlookMessage.attachments?.length || 0} attachments`);
-      console.log(`📄 Content processing: ${outlookMessage.content.length} chars → ${processedContent.length} chars`);
       return combinedMessage;
     } catch (error) {
       console.error('❌ Error getting message:', error);

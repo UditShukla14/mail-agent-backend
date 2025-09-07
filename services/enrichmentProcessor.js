@@ -5,7 +5,7 @@ import Email from '../models/email.js';
 const CONFIG = {
   retryDelay: 60000, // 1 minute delay between retries
   maxRetries: 3,
-  batchSize: 5 // Back to 5 emails per batch as requested
+  batchSize: 10 // Increased batch size for better throughput
 };
 
 // Process a single email with retries
@@ -20,7 +20,6 @@ async function processEmailWithRetry(email, retryCount = 0, emitCallback = null)
           status: 'analyzing',
           message: 'Analyzing email content...'
         });
-        console.log(`✅ EmitCallback for analyzing status completed for email ${email.id}`);
       } else {
         console.log(`⚠️ No emitCallback available for analyzing status for email ${email.id}`);
       }
@@ -45,7 +44,6 @@ async function processEmailWithRetry(email, retryCount = 0, emitCallback = null)
           aiMeta: updatedEmail.aiMeta,
           email: updatedEmail
         });
-        console.log(`✅ EmitCallback for completion status completed for email ${email.id}`);
       } else {
         console.log(`⚠️ No emitCallback available for completion status for email ${email.id}`);
       }
@@ -86,7 +84,6 @@ async function processEmailWithRetry(email, retryCount = 0, emitCallback = null)
           message: `Failed after ${CONFIG.maxRetries} attempts: ${error.message}`,
           error: true
         });
-        console.log(`✅ EmitCallback for error status completed for email ${email.id}`);
       } else {
         console.log(`⚠️ No emitCallback available for error status for email ${email.id}`);
       }
@@ -101,7 +98,6 @@ async function processEmailWithRetry(email, retryCount = 0, emitCallback = null)
 // Process a batch of emails
 export async function processEnrichmentBatch(emails, emitCallback = null) {
   console.log(`🔄 Processing batch of ${emails.length} emails`);
-  console.log(`📡 EmitCallback available: ${!!emitCallback}`);
   
   // Process emails in chunks
   const results = [];
@@ -114,9 +110,9 @@ export async function processEnrichmentBatch(emails, emitCallback = null) {
     );
     results.push(...chunkResults);
     
-    // Add a delay between chunks
+    // Add a shorter delay between chunks for better throughput
     if (i + CONFIG.batchSize < emails.length) {
-      const delay = 30000; // 30 seconds delay between chunks
+      const delay = 15000; // 15 seconds delay between chunks
       console.log(`⏳ Waiting ${delay/1000} seconds before next chunk...`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
