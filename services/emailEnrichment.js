@@ -333,7 +333,7 @@ class EmailEnrichmentService {
       console.log(`📧 Found ${unenrichedEmails.length} emails needing enrichment`);
 
       // Process emails in batches to prevent rate limiting
-      const batchSize = 10; // Increased batch size for better throughput
+      const batchSize = 5; // Back to 5 emails per batch as requested
       const maxRetries = 3;
       const baseDelay = 120000; // 2 minutes base delay for API overload protection
 
@@ -432,9 +432,9 @@ class EmailEnrichmentService {
           }
         }
 
-        // Add shorter delay between batches for better throughput
+        // Add delay between batches to prevent rate limiting
         if (i + batchSize < unenrichedEmails.length) {
-          const delay = 15000; // 15 seconds delay between batches
+          const delay = 30000; // 30 seconds delay between batches to prevent API overload
           console.log(`⏳ Waiting ${delay/1000} seconds before next batch...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }

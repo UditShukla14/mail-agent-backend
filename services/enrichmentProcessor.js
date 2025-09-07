@@ -5,7 +5,7 @@ import Email from '../models/email.js';
 const CONFIG = {
   retryDelay: 60000, // 1 minute delay between retries
   maxRetries: 3,
-  batchSize: 10 // Increased batch size for better throughput
+  batchSize: 5 // Back to 5 emails per batch as requested
 };
 
 // Process a single email with retries
@@ -110,9 +110,9 @@ export async function processEnrichmentBatch(emails, emitCallback = null) {
     );
     results.push(...chunkResults);
     
-    // Add a shorter delay between chunks for better throughput
+    // Add a delay between chunks
     if (i + CONFIG.batchSize < emails.length) {
-      const delay = 15000; // 15 seconds delay between chunks
+      const delay = 30000; // 30 seconds delay between chunks
       console.log(`⏳ Waiting ${delay/1000} seconds before next chunk...`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }

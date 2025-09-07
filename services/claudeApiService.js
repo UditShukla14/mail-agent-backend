@@ -3,11 +3,11 @@ import { RateLimiter } from 'limiter';
 
 // Rate limiting configuration
 const RATE_LIMIT = {
-  tokensPerMinute: 1000, // Updated to match Claude API limit
+  tokensPerMinute: 40000, // Conservative limit
   maxConcurrent: 1, // Only one concurrent request
   retryDelay: 60000, // 1 minute delay between retries
   maxRetries: 3,
-  batchSize: 10 // Increased batch size for better throughput
+  batchSize: 5 // Back to 5 emails per batch as requested
 };
 
 // Create a rate limiter
