@@ -34,7 +34,8 @@ const allowedOrigins = [
   'http://localhost:4173', // Mail agent frontend dev
   'http://localhost:4174', // worXstream frontend dev (Vite)
   'https://xmail.worxstream.io', // Mail agent subdomain
-  'https://worxstream.io', // Main worXstream domain
+  'https://worxstream.io',
+  'https://app-worxstream-io-react-woba6.ondigitalocean.app', // Main worXstream domain
   'https://app.worxstream.io' // Main app domain
 ];
 
