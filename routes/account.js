@@ -181,7 +181,7 @@ router.post('/refresh-token', authenticateUser, async (req, res) => {
 router.delete('/unlink', authenticateUser, async (req, res) => {
   try {
     const worxstreamUserId = req.user.id;
-    const { email } = req.body;
+    const { email, provider } = req.body;
     
     if (!email) {
       return res.status(400).json({ 
