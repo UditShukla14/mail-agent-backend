@@ -46,7 +46,10 @@ router.post('/sync', syncCalendarEvents);
 /**
  * GET /calendar/holidays
  * Get holidays from user's holiday calendars (auto-detects region)
- * Query params: startDate (YYYY-MM-DD, optional), endDate (YYYY-MM-DD, optional)
+ * Query params: 
+ *   - startDate (YYYY-MM-DD, optional) - defaults to start of current year
+ *   - endDate (YYYY-MM-DD, optional) - defaults to end of current year
+ *   - region (optional) - defaults to 'US'. Examples: 'US', 'UK', 'IN', 'CA', 'United States', 'United Kingdom'
  * Headers: Authorization: Bearer <token>, X-User-Info: <JSON user>
  */
 router.get('/holidays', getHolidays);
@@ -87,6 +90,71 @@ router.get('/debug/tokens', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get token debug info',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * GET /calendar/debug/calendars
+ * Debug endpoint to see all calendars for the user
+ */
+router.get('/debug/calendars', async (req, res) => {
+  try {
+    const { user } = req;
+    const axios = (await import('axios')).default;
+    
+    if (!user || !user.id) {
+      return res.status(401).json({
+        success: false,
+        error: 'User authentication required'
+      });
+    }
+
+    // Get user's Outlook token
+    const userToken = await Token.findOne({ 
+      worxstreamUserId: user.id, 
+      provider: 'outlook' 
+    });
+    
+    if (!userToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'No Outlook account connected'
+      });
+    }
+
+    // Fetch all calendars
+    const response = await axios.get(
+      'https://graph.microsoft.com/v1.0/me/calendars',
+      {
+        headers: {
+          'Authorization': `Bearer ${userToken.access_token}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    res.json({
+      success: true,
+      data: {
+        totalCalendars: response.data.value.length,
+        calendars: response.data.value.map(cal => ({
+          id: cal.id,
+          name: cal.name,
+          color: cal.color,
+          isDefaultCalendar: cal.isDefaultCalendar,
+          canShare: cal.canShare,
+          canEdit: cal.canEdit,
+          owner: cal.owner?.name,
+          changeKey: cal.changeKey
+        }))
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get calendars',
       details: error.message
     });
   }

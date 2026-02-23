@@ -454,22 +454,30 @@ export const syncCalendarEvents = async (req, res) => {
 /**
  * Get holidays from user's holiday calendars
  * GET /calendar/holidays
- * Query params: startDate (YYYY-MM-DD), endDate (YYYY-MM-DD)
+ * Query params: startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), region (optional, defaults to 'US')
  * Headers: Authorization: Bearer <token>, X-User-Info: <JSON user>
  */
 export const getHolidays = async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, region } = req.query;
     const { user } = req;
 
+    // Default region to US if not provided
+    const preferredRegion = region || 'US';
+
+    logger.info(`🎉 ===== HOLIDAYS REQUEST START =====`);
+    logger.info(`🎉 User ID: ${user?.id}`);
+    logger.info(`🎉 Start Date: ${startDate || 'not provided (will use current year)'}`);
+    logger.info(`🎉 End Date: ${endDate || 'not provided (will use current year)'}`);
+    logger.info(`🌍 Region: ${preferredRegion}`);
+
     if (!user || !user.id) {
+      logger.error('❌ User authentication failed - no user or user.id');
       return res.status(401).json({
         success: false,
         error: 'User authentication required'
       });
     }
-
-    logger.info(`🎉 Holidays request by user ${user.id} for date range: ${startDate || 'default'} to ${endDate || 'default'}`);
 
     // Parse dates if provided
     let start = null;
@@ -478,30 +486,36 @@ export const getHolidays = async (req, res) => {
     if (startDate) {
       start = new Date(startDate);
       if (isNaN(start.getTime())) {
+        logger.error(`❌ Invalid start date: ${startDate}`);
         return res.status(400).json({
           success: false,
           error: 'Invalid start date format. Use YYYY-MM-DD'
         });
       }
+      logger.info(`📅 Parsed start date: ${start.toISOString()}`);
     }
     
     if (endDate) {
       end = new Date(endDate);
       if (isNaN(end.getTime())) {
+        logger.error(`❌ Invalid end date: ${endDate}`);
         return res.status(400).json({
           success: false,
           error: 'Invalid end date format. Use YYYY-MM-DD'
         });
       }
+      logger.info(`📅 Parsed end date: ${end.toISOString()}`);
     }
 
     // Get access token - we need any Outlook token for the user
-    // Try to get the first available Outlook token for this user
     const accessToken = req.headers['x-access-token'];
+    
+    logger.info(`🔑 X-Access-Token header present: ${!!accessToken}`);
     
     if (!accessToken) {
       // If no token in header, try to get from token manager
-      // Get user's first Outlook account
+      logger.info('🔍 No token in header, checking database for Outlook token...');
+      
       const Token = (await import('../models/Token.js')).default;
       const userToken = await Token.findOne({ 
         worxstreamUserId: user.id, 
@@ -509,6 +523,7 @@ export const getHolidays = async (req, res) => {
       });
       
       if (!userToken) {
+        logger.error(`❌ No Outlook token found in database for user ${user.id}`);
         return res.status(400).json({
           success: false,
           error: 'No Outlook account connected. Please connect your Outlook account to view holidays.',
@@ -516,24 +531,34 @@ export const getHolidays = async (req, res) => {
         });
       }
       
+      logger.info(`✅ Found Outlook token in database for email: ${userToken.email}`);
+      logger.info(`🔑 Token expires in: ${userToken.expires_in} seconds`);
+      logger.info(`🔑 Token timestamp: ${new Date(userToken.timestamp).toISOString()}`);
+      
       // Use the token from database
       try {
+        logger.info('🚀 Calling calendarService.getHolidays...');
+        
         const holidays = await calendarService.getHolidays(
           userToken.access_token,
           start,
-          end
+          end,
+          preferredRegion
         );
 
         logger.info(`✅ Successfully retrieved ${holidays.length} holidays`);
+        logger.info(`🎉 ===== HOLIDAYS REQUEST END (SUCCESS) =====`);
 
-        res.json({
+        return res.json({
           success: true,
           data: holidays
         });
       } catch (error) {
         logger.error('❌ Error fetching holidays:', error.message);
+        logger.error('❌ Error stack:', error.stack);
+        logger.info(`🎉 ===== HOLIDAYS REQUEST END (ERROR) =====`);
         
-        res.status(500).json({
+        return res.status(500).json({
           success: false,
           error: 'Failed to retrieve holidays',
           details: error.message
@@ -541,23 +566,31 @@ export const getHolidays = async (req, res) => {
       }
     } else {
       // Use token from header
+      logger.info('✅ Using token from X-Access-Token header');
+      
       try {
+        logger.info('🚀 Calling calendarService.getHolidays...');
+        
         const holidays = await calendarService.getHolidays(
           accessToken,
           start,
-          end
+          end,
+          preferredRegion
         );
 
         logger.info(`✅ Successfully retrieved ${holidays.length} holidays`);
+        logger.info(`🎉 ===== HOLIDAYS REQUEST END (SUCCESS) =====`);
 
-        res.json({
+        return res.json({
           success: true,
           data: holidays
         });
       } catch (error) {
         logger.error('❌ Error fetching holidays:', error.message);
+        logger.error('❌ Error stack:', error.stack);
+        logger.info(`🎉 ===== HOLIDAYS REQUEST END (ERROR) =====`);
         
-        res.status(500).json({
+        return res.status(500).json({
           success: false,
           error: 'Failed to retrieve holidays',
           details: error.message
@@ -566,7 +599,9 @@ export const getHolidays = async (req, res) => {
     }
 
   } catch (error) {
-    logger.error('❌ Error in getHolidays:', error.message);
+    logger.error('❌ Error in getHolidays controller:', error.message);
+    logger.error('❌ Error stack:', error.stack);
+    logger.info(`🎉 ===== HOLIDAYS REQUEST END (ERROR) =====`);
     
     res.status(500).json({
       success: false,

@@ -1,6 +1,7 @@
 import { worxstreamApi } from '../services/worxstreamApi.js';
 
 // Development fallback user creation
+// Returns minimal user info matching frontend's getMinimalUserInfo
 const createDevUser = (token) => {
   // Extract user ID from token (assuming token contains user info)
   // For development, we'll use a hash of the token as user ID
@@ -9,15 +10,11 @@ const createDevUser = (token) => {
     return a & a;
   }, 0)) % 10000; // Generate a number between 0-9999
   
+  // Return minimal user info only (matching frontend's getMinimalUserInfo)
   return {
     id: userId,
-    name: 'Development User',
     email: `dev-user-${userId}@mailagent.com`,
-    email_verified_at: new Date().toISOString(),
-    status: 'active',
-    is_admin: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    name: 'Development User'
   };
 };
 

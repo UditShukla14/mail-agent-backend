@@ -400,9 +400,10 @@ class CalendarService {
    * @param {string} accessToken - Outlook access token
    * @param {Date} startDate - Start date for holiday range
    * @param {Date} endDate - End date for holiday range
+   * @param {string} preferredRegion - Preferred region (e.g., 'US', 'United States', 'UK', 'United Kingdom')
    * @returns {Array} Array of holiday events
    */
-  async getHolidays(accessToken, startDate = null, endDate = null) {
+  async getHolidays(accessToken, startDate = null, endDate = null, preferredRegion = 'US') {
     try {
       // Set default date range if not provided
       const now = new Date();
@@ -423,28 +424,154 @@ class CalendarService {
       );
 
       logger.info(`📅 Found ${calendarsResponse.data.value.length} total calendars`);
+      
+      // Log all calendar names for debugging
+      calendarsResponse.data.value.forEach(cal => {
+        logger.info(`📅 Calendar: "${cal.name}" (ID: ${cal.id}, canShare: ${cal.canShare}, owner: ${cal.owner?.name})`);
+      });
 
-      // Step 2: Find ALL holiday calendars (user might have multiple regions)
-      // Holiday calendars typically have "Holiday" in the name or are read-only
-      const holidayCalendars = calendarsResponse.data.value.filter(
+      // Step 2: Try multiple strategies to find holiday calendars
+      
+      // Strategy 1: Look for calendars with "Holiday" or "Holidays" in name
+      let holidayCalendars = calendarsResponse.data.value.filter(
         cal => cal.name && (
           cal.name.toLowerCase().includes('holiday') ||
           cal.name.toLowerCase().includes('holidays')
         )
       );
 
+      logger.info(`🔍 Strategy 1 (name contains 'holiday'): Found ${holidayCalendars.length} calendars`);
+
+      // Strategy 2: If no holiday calendars found, try looking for read-only calendars
       if (holidayCalendars.length === 0) {
-        logger.warn('⚠️ No holiday calendars found for this user');
+        holidayCalendars = calendarsResponse.data.value.filter(
+          cal => cal.canShare === false && cal.canEdit === false
+        );
+        logger.info(`🔍 Strategy 2 (read-only calendars): Found ${holidayCalendars.length} calendars`);
+      }
+
+      // Strategy 3: If still none, try all calendars and filter by event content
+      if (holidayCalendars.length === 0) {
+        logger.warn('⚠️ No holiday calendars found using standard strategies');
+        logger.info('🔍 Strategy 3: Will search ALL calendars for holiday events');
+        
+        // Try to find holidays in ALL calendars
+        const allHolidays = [];
+        
+        for (const calendar of calendarsResponse.data.value) {
+          try {
+            logger.info(`🔍 Checking calendar "${calendar.name}" for holiday events...`);
+            
+            const url = `${this.outlookApiUrl}/me/calendars/${calendar.id}/events`;
+            const params = {
+              $filter: `start/dateTime ge '${start.toISOString()}' and end/dateTime le '${end.toISOString()}'`,
+              $select: 'id,subject,start,end,isAllDay,categories',
+              $orderby: 'start/dateTime',
+              $top: 10 // Just check first 10 events
+            };
+
+            const response = await axios.get(url, {
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+              },
+              params
+            });
+
+            logger.info(`  📊 Found ${response.data.value.length} events in "${calendar.name}"`);
+            
+            // Check if any events look like holidays
+            const potentialHolidays = response.data.value.filter(event => {
+              const subject = event.subject?.toLowerCase() || '';
+              return event.isAllDay && (
+                subject.includes('holiday') ||
+                subject.includes('day') ||
+                subject.includes('christmas') ||
+                subject.includes('new year') ||
+                subject.includes('thanksgiving') ||
+                subject.includes('independence') ||
+                subject.includes('memorial') ||
+                subject.includes('labor')
+              );
+            });
+            
+            if (potentialHolidays.length > 0) {
+              logger.info(`  ✅ Found ${potentialHolidays.length} potential holiday events in "${calendar.name}"`);
+              holidayCalendars.push(calendar);
+              break; // Found a calendar with holidays
+            }
+            
+          } catch (error) {
+            logger.error(`  ❌ Error checking calendar "${calendar.name}":`, error.message);
+          }
+        }
+      }
+
+      if (holidayCalendars.length === 0) {
+        logger.warn('⚠️ No holiday calendars found after all strategies');
+        logger.info('💡 Suggestion: User may need to add a holiday calendar in Outlook');
+        logger.info('💡 Or try expanding date range to include more events');
         return [];
       }
 
       logger.info(`🎉 Found ${holidayCalendars.length} holiday calendar(s): ${holidayCalendars.map(c => c.name).join(', ')}`);
 
-      // Step 3: Fetch holidays from ALL holiday calendars
+      // Step 3: Filter by preferred region if specified
+      let filteredCalendars = holidayCalendars;
+      
+      if (preferredRegion) {
+        logger.info(`🌍 Preferred region specified: ${preferredRegion}`);
+        
+        // Create region mapping for common region codes
+        const regionMapping = {
+          'US': ['united states', 'usa', 'u.s.', 'america'],
+          'UK': ['united kingdom', 'uk', 'britain', 'great britain'],
+          'IN': ['india', 'indian'],
+          'CA': ['canada', 'canadian'],
+          'AU': ['australia', 'australian'],
+          'DE': ['germany', 'german', 'deutschland'],
+          'FR': ['france', 'french'],
+          'JP': ['japan', 'japanese'],
+          'CN': ['china', 'chinese']
+        };
+        
+        // Normalize the preferred region
+        const normalizedPreferred = preferredRegion.toLowerCase();
+        
+        // Find matching calendars
+        const matchedCalendars = holidayCalendars.filter(cal => {
+          const calNameLower = cal.name.toLowerCase();
+          
+          // Direct match with preferred region
+          if (calNameLower.includes(normalizedPreferred)) {
+            return true;
+          }
+          
+          // Check if preferred region is a code (like 'US', 'UK')
+          if (regionMapping[preferredRegion.toUpperCase()]) {
+            const regionTerms = regionMapping[preferredRegion.toUpperCase()];
+            return regionTerms.some(term => calNameLower.includes(term));
+          }
+          
+          return false;
+        });
+        
+        if (matchedCalendars.length > 0) {
+          filteredCalendars = matchedCalendars;
+          logger.info(`✅ Found ${filteredCalendars.length} calendar(s) matching region "${preferredRegion}": ${filteredCalendars.map(c => c.name).join(', ')}`);
+        } else {
+          logger.warn(`⚠️ No calendars found for region "${preferredRegion}", using all holiday calendars`);
+          logger.info(`💡 Available holiday calendars: ${holidayCalendars.map(c => c.name).join(', ')}`);
+        }
+      }
+
+      // Step 4: Fetch holidays from filtered calendars
       const allHolidays = [];
 
-      for (const calendar of holidayCalendars) {
+      for (const calendar of filteredCalendars) {
         try {
+          logger.info(`📥 Fetching events from calendar: "${calendar.name}"`);
+          
           const url = `${this.outlookApiUrl}/me/calendars/${calendar.id}/events`;
           const params = {
             $filter: `start/dateTime ge '${start.toISOString()}' and end/dateTime le '${end.toISOString()}'`,
@@ -453,6 +580,9 @@ class CalendarService {
             $top: 500
           };
 
+          logger.info(`  🔍 API URL: ${url}`);
+          logger.info(`  🔍 Filter: ${params.$filter}`);
+
           const response = await axios.get(url, {
             headers: {
               'Authorization': `Bearer ${accessToken}`,
@@ -460,6 +590,8 @@ class CalendarService {
             },
             params
           });
+
+          logger.info(`  📊 API returned ${response.data.value.length} events`);
 
           const holidays = response.data.value.map(holiday => ({
             id: holiday.id,
@@ -476,10 +608,14 @@ class CalendarService {
 
           allHolidays.push(...holidays);
 
-          logger.info(`✅ Fetched ${holidays.length} holidays from "${calendar.name}"`);
+          logger.info(`  ✅ Processed ${holidays.length} holidays from "${calendar.name}"`);
 
         } catch (error) {
           logger.error(`❌ Error fetching from calendar "${calendar.name}":`, error.message);
+          if (error.response) {
+            logger.error(`  ❌ Status: ${error.response.status}`);
+            logger.error(`  ❌ Data:`, error.response.data);
+          }
           // Continue with other calendars even if one fails
         }
       }
@@ -488,11 +624,17 @@ class CalendarService {
       allHolidays.sort((a, b) => new Date(a.start) - new Date(b.start));
 
       logger.info(`✅ Total holidays fetched: ${allHolidays.length}`);
+      
+      if (allHolidays.length > 0) {
+        logger.info(`📅 First holiday: ${allHolidays[0].title} on ${allHolidays[0].start}`);
+        logger.info(`📅 Last holiday: ${allHolidays[allHolidays.length - 1].title} on ${allHolidays[allHolidays.length - 1].start}`);
+      }
 
       return allHolidays;
 
     } catch (error) {
       logger.error(`❌ Error fetching holidays:`, error.message);
+      logger.error(`❌ Error stack:`, error.stack);
       
       if (error.response) {
         logger.error(`❌ Microsoft Graph API Error:`, {
