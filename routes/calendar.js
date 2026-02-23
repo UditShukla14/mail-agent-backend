@@ -3,7 +3,8 @@ import {
   getCalendarEvents, 
   getMultiAccountCalendarEvents, 
   getStoredCalendarEvents,
-  syncCalendarEvents
+  syncCalendarEvents,
+  getHolidays
 } from '../controllers/calendarController.js';
 import { authenticateUser } from '../middleware/auth.js';
 import Token from '../models/Token.js';
@@ -41,6 +42,14 @@ router.get('/events/stored', getStoredCalendarEvents);
  * Query params: email, startDate (optional), endDate (optional)
  */
 router.post('/sync', syncCalendarEvents);
+
+/**
+ * GET /calendar/holidays
+ * Get holidays from user's holiday calendars (auto-detects region)
+ * Query params: startDate (YYYY-MM-DD, optional), endDate (YYYY-MM-DD, optional)
+ * Headers: Authorization: Bearer <token>, X-User-Info: <JSON user>
+ */
+router.get('/holidays', getHolidays);
 
 /**
  * GET /calendar/debug/tokens

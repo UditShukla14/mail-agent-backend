@@ -450,3 +450,128 @@ export const syncCalendarEvents = async (req, res) => {
     });
   }
 };
+
+/**
+ * Get holidays from user's holiday calendars
+ * GET /calendar/holidays
+ * Query params: startDate (YYYY-MM-DD), endDate (YYYY-MM-DD)
+ * Headers: Authorization: Bearer <token>, X-User-Info: <JSON user>
+ */
+export const getHolidays = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const { user } = req;
+
+    if (!user || !user.id) {
+      return res.status(401).json({
+        success: false,
+        error: 'User authentication required'
+      });
+    }
+
+    logger.info(`🎉 Holidays request by user ${user.id} for date range: ${startDate || 'default'} to ${endDate || 'default'}`);
+
+    // Parse dates if provided
+    let start = null;
+    let end = null;
+    
+    if (startDate) {
+      start = new Date(startDate);
+      if (isNaN(start.getTime())) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid start date format. Use YYYY-MM-DD'
+        });
+      }
+    }
+    
+    if (endDate) {
+      end = new Date(endDate);
+      if (isNaN(end.getTime())) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid end date format. Use YYYY-MM-DD'
+        });
+      }
+    }
+
+    // Get access token - we need any Outlook token for the user
+    // Try to get the first available Outlook token for this user
+    const accessToken = req.headers['x-access-token'];
+    
+    if (!accessToken) {
+      // If no token in header, try to get from token manager
+      // Get user's first Outlook account
+      const Token = (await import('../models/Token.js')).default;
+      const userToken = await Token.findOne({ 
+        worxstreamUserId: user.id, 
+        provider: 'outlook' 
+      });
+      
+      if (!userToken) {
+        return res.status(400).json({
+          success: false,
+          error: 'No Outlook account connected. Please connect your Outlook account to view holidays.',
+          code: 'NO_OUTLOOK_ACCOUNT'
+        });
+      }
+      
+      // Use the token from database
+      try {
+        const holidays = await calendarService.getHolidays(
+          userToken.access_token,
+          start,
+          end
+        );
+
+        logger.info(`✅ Successfully retrieved ${holidays.length} holidays`);
+
+        res.json({
+          success: true,
+          data: holidays
+        });
+      } catch (error) {
+        logger.error('❌ Error fetching holidays:', error.message);
+        
+        res.status(500).json({
+          success: false,
+          error: 'Failed to retrieve holidays',
+          details: error.message
+        });
+      }
+    } else {
+      // Use token from header
+      try {
+        const holidays = await calendarService.getHolidays(
+          accessToken,
+          start,
+          end
+        );
+
+        logger.info(`✅ Successfully retrieved ${holidays.length} holidays`);
+
+        res.json({
+          success: true,
+          data: holidays
+        });
+      } catch (error) {
+        logger.error('❌ Error fetching holidays:', error.message);
+        
+        res.status(500).json({
+          success: false,
+          error: 'Failed to retrieve holidays',
+          details: error.message
+        });
+      }
+    }
+
+  } catch (error) {
+    logger.error('❌ Error in getHolidays:', error.message);
+    
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve holidays',
+      details: error.message
+    });
+  }
+};

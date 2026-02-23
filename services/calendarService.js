@@ -394,6 +394,117 @@ class CalendarService {
       throw error;
     }
   }
+
+  /**
+   * Get holidays from user's holiday calendars (auto-detects region)
+   * @param {string} accessToken - Outlook access token
+   * @param {Date} startDate - Start date for holiday range
+   * @param {Date} endDate - End date for holiday range
+   * @returns {Array} Array of holiday events
+   */
+  async getHolidays(accessToken, startDate = null, endDate = null) {
+    try {
+      // Set default date range if not provided
+      const now = new Date();
+      const start = startDate || new Date(now.getFullYear(), 0, 1); // Start of current year
+      const end = endDate || new Date(now.getFullYear(), 11, 31);   // End of current year
+
+      logger.info(`🎉 Fetching holidays from ${start.toISOString()} to ${end.toISOString()}`);
+
+      // Step 1: Get all user's calendars
+      const calendarsResponse = await axios.get(
+        `${this.outlookApiUrl}/me/calendars`,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      logger.info(`📅 Found ${calendarsResponse.data.value.length} total calendars`);
+
+      // Step 2: Find ALL holiday calendars (user might have multiple regions)
+      // Holiday calendars typically have "Holiday" in the name or are read-only
+      const holidayCalendars = calendarsResponse.data.value.filter(
+        cal => cal.name && (
+          cal.name.toLowerCase().includes('holiday') ||
+          cal.name.toLowerCase().includes('holidays')
+        )
+      );
+
+      if (holidayCalendars.length === 0) {
+        logger.warn('⚠️ No holiday calendars found for this user');
+        return [];
+      }
+
+      logger.info(`🎉 Found ${holidayCalendars.length} holiday calendar(s): ${holidayCalendars.map(c => c.name).join(', ')}`);
+
+      // Step 3: Fetch holidays from ALL holiday calendars
+      const allHolidays = [];
+
+      for (const calendar of holidayCalendars) {
+        try {
+          const url = `${this.outlookApiUrl}/me/calendars/${calendar.id}/events`;
+          const params = {
+            $filter: `start/dateTime ge '${start.toISOString()}' and end/dateTime le '${end.toISOString()}'`,
+            $select: 'id,subject,start,end,isAllDay,categories,location',
+            $orderby: 'start/dateTime',
+            $top: 500
+          };
+
+          const response = await axios.get(url, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            params
+          });
+
+          const holidays = response.data.value.map(holiday => ({
+            id: holiday.id,
+            title: holiday.subject,
+            start: holiday.start.dateTime || holiday.start.date,
+            end: holiday.end.dateTime || holiday.end.date,
+            allDay: holiday.isAllDay !== false, // Default to true for holidays
+            region: calendar.name,
+            calendarId: calendar.id,
+            calendarName: calendar.name,
+            categories: holiday.categories || [],
+            location: holiday.location?.displayName || ''
+          }));
+
+          allHolidays.push(...holidays);
+
+          logger.info(`✅ Fetched ${holidays.length} holidays from "${calendar.name}"`);
+
+        } catch (error) {
+          logger.error(`❌ Error fetching from calendar "${calendar.name}":`, error.message);
+          // Continue with other calendars even if one fails
+        }
+      }
+
+      // Sort by date
+      allHolidays.sort((a, b) => new Date(a.start) - new Date(b.start));
+
+      logger.info(`✅ Total holidays fetched: ${allHolidays.length}`);
+
+      return allHolidays;
+
+    } catch (error) {
+      logger.error(`❌ Error fetching holidays:`, error.message);
+      
+      if (error.response) {
+        logger.error(`❌ Microsoft Graph API Error:`, {
+          status: error.response.status,
+          statusText: error.response.statusText,
+          data: error.response.data
+        });
+      }
+      
+      throw new Error(`Failed to fetch holidays: ${error.message}`);
+    }
+  }
 }
 
 export default new CalendarService();
