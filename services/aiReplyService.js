@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import dotenv from 'dotenv';
+import { ANTHROPIC_MODEL } from '../utils/anthropicConfig.js';
 
 dotenv.config();
 
@@ -37,7 +38,7 @@ export class AIReplyService {
       const userPrompt = `Original Email:\nFrom: ${originalEmail.from}\nSubject: ${originalEmail.subject}\nContent: ${originalEmail.content || originalEmail.body || ''}\nTimestamp: ${originalEmail.timestamp}\n\nRecipient Name: ${recipientName}\nSender Name: ${senderName}\n\nPlease generate a ${userTone} reply for this email, using the names above.`;
 
       const response = await anthropic.messages.create({
-        model: 'claude-3-haiku-20240307',
+        model: ANTHROPIC_MODEL,
         max_tokens: 1000,
         system: systemPrompt,
         messages: [
@@ -92,7 +93,7 @@ export class AIReplyService {
       const userPrompt = `Please compose a ${userTone} email with the following details:\n\nSubject: ${subject || 'No subject provided'}\nRecipient: ${recipient || 'No recipient specified'}\nPurpose: ${purpose || 'General communication'}\n\nRecipient Name: ${recipientName}\nSender Name: ${senderName}\n\nGenerate both a subject line (if not provided) and email body. IMPORTANT: Use the actual names provided above in the email. If recipient name is available, use it in the greeting. If sender name is available, use it in the signature. DO NOT use placeholders like [Recipient] or [Sender].`;
 
       const response = await anthropic.messages.create({
-        model: 'claude-3-haiku-20240307',
+        model: ANTHROPIC_MODEL,
         max_tokens: 1000,
         system: systemPrompt,
         messages: [
@@ -162,7 +163,7 @@ Additional context: ${additionalContext}`;
       const userPrompt = `Please improve the following email content:\n\n${currentContent}\n\nImprovement type: ${improvementType}\nDesired tone: ${userTone}\nRecipient Name: ${recipientName}\nSender Name: ${senderName}\n\nReturn only the improved email content, using the names above.`;
 
       const response = await anthropic.messages.create({
-        model: 'claude-3-haiku-20240307',
+        model: ANTHROPIC_MODEL,
         max_tokens: 1000,
         system: systemPrompt,
         messages: [

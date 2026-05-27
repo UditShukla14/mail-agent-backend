@@ -1,5 +1,6 @@
 // services/claudeApiService.js
 import { RateLimiter } from 'limiter';
+import { ANTHROPIC_MODEL } from '../utils/anthropicConfig.js';
 
 // Rate limiting configuration
 const RATE_LIMIT = {
@@ -75,7 +76,7 @@ async function makeClaudeApiCall(prompt, retryCount = 0) {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-3-haiku-20240307',
+        model: ANTHROPIC_MODEL,
         max_tokens: 4000,
         messages: [
           {
@@ -93,6 +94,13 @@ async function makeClaudeApiCall(prompt, retryCount = 0) {
         statusText: response.statusText,
         error: errorData
       });
+
+      // Model/config errors won't succeed on retry
+      if (response.status === 404) {
+        throw new Error(
+          `Claude API error: ${response.status} ${response.statusText} (model: ${ANTHROPIC_MODEL})`
+        );
+      }
 
       // If rate limited, wait and retry
       if (response.status === 429 || response.status === 529) {
