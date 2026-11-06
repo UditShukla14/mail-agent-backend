@@ -395,11 +395,11 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 📤 Send email
-  socket.on('mail:send', async ({ worxstreamUserId, email, to, subject, body, cc, bcc }) => {
+  socket.on('mail:send', async ({ worxstreamUserId, email, to, subject, body, cc, bcc, contentType }) => {
     const token = await getToken(worxstreamUserId, email, 'outlook');
     if (!token) return socket.emit('mail:error', 'Token not found');
 
-    const result = await sendEmail(token, { to, subject, body, cc, bcc });
+    const result = await sendEmail(token, { to, subject, body, cc, bcc, contentType });
     socket.emit('mail:sent', result);
   });
 

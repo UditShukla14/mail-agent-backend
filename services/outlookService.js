@@ -1,12 +1,25 @@
 import axios from 'axios';
 import { simpleParser } from 'mailparser';
+
+function looksLikeHtml(body) {
+  return /<\/?[a-z][\s\S]*>/i.test(String(body || ''));
+}
+
+/** Graph expects `HTML` or `Text`. Prefer explicit contentType; else detect tags. */
+function resolveGraphBodyContentType(contentType, body) {
+  const explicit = String(contentType || '').trim().toLowerCase();
+  if (explicit === 'html' || explicit === 'text/html') return 'HTML';
+  if (explicit === 'text' || explicit === 'text/plain') return 'Text';
+  return looksLikeHtml(body) ? 'HTML' : 'Text';
+}
+
 // 📤 Send email
-async function sendEmail(accessToken, { to, subject = '', body, cc, bcc }) {
+async function sendEmail(accessToken, { to, subject = '', body, cc, bcc, contentType }) {
   try {
     const message = {
       subject,
       body: {
-        contentType: 'Text',
+        contentType: resolveGraphBodyContentType(contentType, body),
         content: body
       },
       toRecipients: to

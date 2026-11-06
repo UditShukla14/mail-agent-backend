@@ -197,14 +197,26 @@ async function markMessageImportant(accessToken, messageId, important = true) {
   }
 }
 
+function looksLikeHtml(body) {
+  return /<\/?[a-z][\s\S]*>/i.test(String(body || ''));
+}
+
+function resolveGmailBodyMimeType(contentType, body) {
+  const explicit = String(contentType || '').trim().toLowerCase();
+  if (explicit === 'html' || explicit === 'text/html') return 'text/html';
+  if (explicit === 'text' || explicit === 'text/plain') return 'text/plain';
+  return looksLikeHtml(body) ? 'text/html' : 'text/plain';
+}
+
 // Send email
-async function sendEmail(accessToken, { to, subject = '', body, cc, bcc }) {
+async function sendEmail(accessToken, { to, subject = '', body, cc, bcc, contentType }) {
   try {
     const gmail = getGmailClient(accessToken);
-    
+    const mimeType = resolveGmailBodyMimeType(contentType, body);
+
     // Create email message
     const message = [
-      'Content-Type: text/plain; charset="UTF-8"\n',
+      `Content-Type: ${mimeType}; charset="UTF-8"\n`,
       'MIME-Version: 1.0\n',
       `To: ${to}\n`,
       cc ? `Cc: ${cc}\n` : '',
