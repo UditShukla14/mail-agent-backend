@@ -37,8 +37,21 @@ export const initMailSocket = (socket, io) => {
     }, DEBOUNCE_DELAY));
   };
 
+  // Every handler acts as the authenticated user: whatever worxstreamUserId the client sends in the payload is
+  // replaced with the id verified at connection time, so one user cannot address another user's mailbox.
+  const onAuthed = (event, handler) => {
+    socket.on(event, (payload, ...rest) => {
+      const userId = Number(socket.user?.id);
+      if (!Number.isFinite(userId)) {
+        socket.emit('mail:error', 'Not authenticated');
+        return;
+      }
+      return handler({ ...(payload || {}), worxstreamUserId: userId }, ...rest);
+    });
+  };
+
   // Unified socket initialization - called when user logs into worXstream
-  socket.on('unified:init', async ({ worxstreamUserId, userInfo }) => {
+  onAuthed('unified:init', async ({ worxstreamUserId, userInfo }) => {
     try {
       
       // Store worxstreamUserId on socket for unified access
@@ -58,7 +71,7 @@ export const initMailSocket = (socket, io) => {
   });
 
   // Mail-specific initialization (for when user navigates to mail page)
-  socket.on('mail:init', async ({ worxstreamUserId, email }) => {
+  onAuthed('mail:init', async ({ worxstreamUserId, email }) => {
     try {
       
       // Check if this user already has an active socket for this email
@@ -77,7 +90,7 @@ export const initMailSocket = (socket, io) => {
       socket.worxstreamUserId = worxstreamUserId;
     
       // Use the authenticated user's ID instead of the passed worxstreamUserId
-      const userId = socket.user?.id || worxstreamUserId;
+      const userId = worxstreamUserId;
     
       const token = await getToken(userId, email, 'outlook');
       if (!token) {
@@ -106,7 +119,7 @@ export const initMailSocket = (socket, io) => {
 
 
   // New handler for enriching specific emails
-  socket.on('mail:enrichEmails', async ({ worxstreamUserId, email, messageIds, forceReanalyze = false }) => {
+  onAuthed('mail:enrichEmails', async ({ worxstreamUserId, email, messageIds, forceReanalyze = false }) => {
     try {
       console.log('🔍 Enrichment request received:', { 
         worxstreamUserId, 
@@ -156,13 +169,13 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 📁 Get folders only (for when already initialized)
-  socket.on('mail:getFolders', async ({ worxstreamUserId, email }) => {
+  onAuthed('mail:getFolders', async ({ worxstreamUserId, email }) => {
     try {
       // Store worxstreamUserId on socket for later use
       socket.worxstreamUserId = worxstreamUserId;
     
       // Use the authenticated user's ID instead of the passed worxstreamUserId
-      const userId = Number(socket.user?.id || worxstreamUserId);
+      const userId = worxstreamUserId;
       
       // Check if the email has a valid token for this user
       const token = await getToken(userId, email, 'outlook');
@@ -187,7 +200,7 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 📁 Load paginated folder messages
-      socket.on('mail:getFolder', async ({ worxstreamUserId, email, folderId, page = 1, filters = {} }) => {
+      onAuthed('mail:getFolder', async ({ worxstreamUserId, email, folderId, page = 1, filters = {} }) => {
     
     const debounceKey = `getFolder:${worxstreamUserId}:${email}:${folderId}:${page}:${JSON.stringify(filters)}`;
     
@@ -195,7 +208,7 @@ export const initMailSocket = (socket, io) => {
       try {
         // Use the authenticated user's ID instead of the passed worxstreamUserId
         // Ensure we use the correct type (Number) for worxstreamUserId
-        const userId = Number(socket.user?.id || worxstreamUserId);
+        const userId = worxstreamUserId;
         
         
         // For page 1, try to get messages from database with filters first
@@ -360,7 +373,7 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 📧 Full message
-  socket.on('mail:getMessage', async ({ worxstreamUserId, email, messageId }) => {
+  onAuthed('mail:getMessage', async ({ worxstreamUserId, email, messageId }) => {
     try {
       // Use emailService to get message with AI metadata combined
       const emailService = await import('../services/emailService.js');
@@ -379,7 +392,7 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 📎 Get attachments separately
-  socket.on('mail:getAttachments', async ({ worxstreamUserId, email, messageId }) => {
+  onAuthed('mail:getAttachments', async ({ worxstreamUserId, email, messageId }) => {
     try {
       const token = await getToken(worxstreamUserId, email, 'outlook');
       if (!token) return socket.emit('mail:error', 'Token not found');
@@ -395,7 +408,7 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 📤 Send email
-  socket.on('mail:send', async ({ worxstreamUserId, email, to, subject, body, cc, bcc, contentType }) => {
+  onAuthed('mail:send', async ({ worxstreamUserId, email, to, subject, body, cc, bcc, contentType }) => {
     const token = await getToken(worxstreamUserId, email, 'outlook');
     if (!token) return socket.emit('mail:error', 'Token not found');
 
@@ -404,7 +417,7 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 📧 Reply to email
-  socket.on('mail:reply', async ({ worxstreamUserId, email, messageId, comment, toRecipients, ccRecipients, bccRecipients }) => {
+  onAuthed('mail:reply', async ({ worxstreamUserId, email, messageId, comment, toRecipients, ccRecipients, bccRecipients }) => {
     try {
       
       const token = await getToken(worxstreamUserId, email, 'outlook');
@@ -434,7 +447,7 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 📧 Reply all to email
-  socket.on('mail:replyAll', async ({ worxstreamUserId, email, messageId, comment, toRecipients, ccRecipients, bccRecipients }) => {
+  onAuthed('mail:replyAll', async ({ worxstreamUserId, email, messageId, comment, toRecipients, ccRecipients, bccRecipients }) => {
     try {
       
       const token = await getToken(worxstreamUserId, email, 'outlook');
@@ -464,7 +477,7 @@ export const initMailSocket = (socket, io) => {
   });
 
   // ✅ Mark as read
-  socket.on('mail:markRead', async ({ worxstreamUserId, email, messageId }) => {
+  onAuthed('mail:markRead', async ({ worxstreamUserId, email, messageId }) => {
     const token = await getToken(worxstreamUserId, email, 'outlook');
     if (!token) return;
 
@@ -477,7 +490,7 @@ export const initMailSocket = (socket, io) => {
   });
 
   // ⭐ Mark as important
-  socket.on('mail:markImportant', async ({ worxstreamUserId, email, messageId, flag }) => {
+  onAuthed('mail:markImportant', async ({ worxstreamUserId, email, messageId, flag }) => {
     const token = await getToken(worxstreamUserId, email, 'outlook');
     if (!token) return;
 
@@ -490,7 +503,7 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 🔄 Retry enrichment
-  socket.on('mail:retryEnrichment', async ({ worxstreamUserId, email, messageId }) => {
+  onAuthed('mail:retryEnrichment', async ({ worxstreamUserId, email, messageId }) => {
     try {
       const emailDoc = await Email.findOne({ id: messageId, email: email });
       if (!emailDoc) {
@@ -553,7 +566,7 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 🗑️ Delete message
-  socket.on('mail:delete', async ({ worxstreamUserId, email, messageId }) => {
+  onAuthed('mail:delete', async ({ worxstreamUserId, email, messageId }) => {
     try {
       
       const token = await getToken(worxstreamUserId, email, 'outlook');
@@ -580,7 +593,7 @@ export const initMailSocket = (socket, io) => {
   });
 
   // 🏷️ Update email category
-  socket.on('mail:updateCategory', async ({ worxstreamUserId, email, messageId, category }) => {
+  onAuthed('mail:updateCategory', async ({ worxstreamUserId, email, messageId, category }) => {
     try {
       
       // Get user to verify they exist

@@ -1,137 +1,58 @@
-import { worxstreamApi } from '../services/worxstreamApi.js';
+import { verifyBearerToken, DEV_USER, isDevFallbackAllowed } from '../utils/authVerify.js';
 
-// Development fallback user creation
-// Returns minimal user info matching frontend's getMinimalUserInfo
-const createDevUser = (token) => {
-  // Extract user ID from token (assuming token contains user info)
-  // For development, we'll use a hash of the token as user ID
-  const userId = Math.abs(token.split('').reduce((a, b) => {
-    a = ((a << 5) - a) + b.charCodeAt(0);
-    return a & a;
-  }, 0)) % 10000; // Generate a number between 0-9999
-  
-  // Return minimal user info only (matching frontend's getMinimalUserInfo)
-  return {
-    id: userId,
-    email: `dev-user-${userId}@mailagent.com`,
-    name: 'Development User'
-  };
+const bearerFrom = (req) => {
+  const header = req.headers.authorization;
+  return header && header.startsWith('Bearer ') ? header.substring(7).trim() : null;
 };
 
-// Authentication middleware for worXstream integration
+/**
+ * Authentication middleware. The caller's identity comes only from verifying the bearer token with worXstream;
+ * the X-User-Info header sent by older clients is ignored.
+ */
 export const authenticateUser = async (req, res, next) => {
-  try {
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({
-        success: false,
-        error: 'Authorization token required',
-        code: 'TOKEN_MISSING'
-      });
-    }
+  const token = bearerFrom(req);
+  if (!token) {
+    return res.status(401).json({ success: false, error: 'Authorization token required', code: 'TOKEN_MISSING' });
+  }
 
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-    
-    // Check if user info is provided in headers (from frontend)
-    const userInfoHeader = req.headers['x-user-info'];
-    if (userInfoHeader) {
-      try {
-        const userInfo = JSON.parse(userInfoHeader);
-        req.user = userInfo;
-        req.token = token;
-        return next();
-      } catch (error) {
-        console.error('Error parsing user info:', error);
-        // Silently handle parsing error
-      }
-    }
-    
-    // Try to verify token with worXstream backend
-    const verificationResult = await worxstreamApi.verifyUserToken(token);
-    
-    if (verificationResult.success) {
-      // Successfully verified with worXstream
-      req.user = verificationResult.user;
-      req.token = token;
-    } else {
-      // worXstream API not available, use development fallback
-      if (process.env.NODE_ENV === 'development') {
-        req.user = createDevUser(token);
-        req.token = token;
-      } else {
-        return res.status(401).json({
-          success: false,
-          error: verificationResult.error || 'Invalid or expired token',
-          code: 'TOKEN_INVALID'
-        });
-      }
-    }
-    
-    next();
-  } catch (error) {
-    // In development mode, fallback to dev user
-    if (process.env.NODE_ENV === 'development') {
-      const token = req.headers.authorization?.substring(7) || 'dev-token';
-      req.user = createDevUser(token);
+  try {
+    const { user, reason } = await verifyBearerToken(token);
+    if (user) {
+      req.user = user;
       req.token = token;
       return next();
     }
-    
-    return res.status(500).json({
-      success: false,
-      error: 'Authentication service error',
-      code: 'AUTH_SERVICE_ERROR'
-    });
+    if (isDevFallbackAllowed() && reason !== 'invalid') {
+      req.user = { ...DEV_USER };
+      req.token = token;
+      return next();
+    }
+    if (reason === 'unavailable') {
+      return res.status(503).json({ success: false, error: 'Authentication service unavailable', code: 'AUTH_SERVICE_UNAVAILABLE' });
+    }
+    return res.status(401).json({ success: false, error: 'Invalid or expired token', code: 'TOKEN_INVALID' });
+  } catch (error) {
+    console.error('Authentication error:', error.message);
+    return res.status(500).json({ success: false, error: 'Authentication service error', code: 'AUTH_SERVICE_ERROR' });
   }
 };
 
-// Optional authentication middleware (for routes that can work with or without auth)
+/** For routes that work with or without a signed-in user: req.user is null unless the token verifies. */
 export const optionalAuth = async (req, res, next) => {
+  req.user = null;
+  req.token = null;
+  const token = bearerFrom(req);
+  if (!token) return next();
   try {
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      // No token provided, continue without authentication
-      req.user = null;
-      req.token = null;
-      return next();
-    }
-
-    const token = authHeader.substring(7);
-    
-    // Try to verify token with worXstream backend
-    const verificationResult = await worxstreamApi.verifyUserToken(token);
-    
-    if (verificationResult.success) {
-      req.user = verificationResult.user;
+    const { user } = await verifyBearerToken(token);
+    if (user) {
+      req.user = user;
       req.token = token;
-    } else {
-      // In development mode, use fallback
-      if (process.env.NODE_ENV === 'development') {
-        req.user = createDevUser(token);
-        req.token = token;
-      } else {
-        req.user = null;
-        req.token = null;
-      }
     }
-    
-    next();
   } catch (error) {
-    // In development mode, use fallback
-    if (process.env.NODE_ENV === 'development') {
-      const token = req.headers.authorization?.substring(7) || 'dev-token';
-      req.user = createDevUser(token);
-      req.token = token;
-    } else {
-      // Continue without authentication on error
-      req.user = null;
-      req.token = null;
-    }
-    
-    next();
+    console.error('Optional authentication error:', error.message);
   }
+  next();
 };
 
 // TODO: Re-implement validateMailAccess when subscription system is ready

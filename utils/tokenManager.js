@@ -134,7 +134,8 @@ export const saveToken = async (worxstreamUserId, email, tokenResponse, provider
           userId: user._id,
           email,
           provider,
-          isActive: true
+          isActive: true,
+          worxstreamUserId: Number(worxstreamUserId)
         },
         { upsert: true, new: true }
       );

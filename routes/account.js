@@ -6,6 +6,7 @@ import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
 import { authenticateUser } from '../middleware/auth.js';
 import { getUserTokens, deleteToken, refreshSpecificToken } from '../utils/tokenManager.js';
+import { deleteMailSubscriptionForAccount } from '../services/outlookSubscriptionService.js';
 
 const router = express.Router();
 
@@ -208,6 +209,15 @@ router.delete('/unlink', authenticateUser, async (req, res) => {
     // Check what tokens exist for this user
     const userTokens = await getUserTokens(worxstreamUserId);
     console.log(`🔍 Available tokens for user:`, userTokens.map(t => ({ email: t.email, provider: t.provider })));
+
+    // Tear down Graph webhook subscription before deleting the token
+    if (!provider || provider === 'outlook') {
+      try {
+        await deleteMailSubscriptionForAccount(worxstreamUserId, email);
+      } catch (subErr) {
+        console.warn(`⚠️ Graph subscription cleanup failed for ${email}:`, subErr.message);
+      }
+    }
     
     // Delete the token for this account
     const tokenDeleted = await deleteToken(worxstreamUserId, email, provider);

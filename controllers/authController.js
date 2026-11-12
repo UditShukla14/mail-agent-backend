@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { saveToken, getToken } from '../utils/tokenManager.js';
 import { google } from 'googleapis';
 import { authenticateUser } from '../middleware/auth.js';
+import { createMailSubscription } from '../services/outlookSubscriptionService.js';
 
 dotenv.config();
 
@@ -129,6 +130,21 @@ export const outlookRedirect = async (req, res) => {
       throw new Error('Token verification failed');
     }
     console.log('✅ Token verified');
+
+    // Subscribe to Inbox change notifications for instant mail push
+    try {
+      if (process.env.OUTLOOK_WEBHOOK_CLIENT_STATE) {
+        await createMailSubscription(worxstreamUserId, email, access_token);
+      } else {
+        console.warn('⚠️ Skipping Graph mail subscription — OUTLOOK_WEBHOOK_CLIENT_STATE not set');
+      }
+    } catch (subErr) {
+      // Do not fail OAuth if webhook subscription fails; renewal/backfill can retry
+      console.error(
+        '❌ Failed to create Outlook mail subscription:',
+        subErr?.response?.data || subErr.message
+      );
+    }
 
     if (callbackUrl) {
       const redirectUrl = new URL(callbackUrl);

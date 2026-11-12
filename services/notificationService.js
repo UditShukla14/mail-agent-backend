@@ -88,6 +88,56 @@ class NotificationService {
       console.error('❌ Error sending token refresh failure notification:', error);
     }
   }
+
+  matchesUser(socket, worxstreamUserId) {
+    const target = String(worxstreamUserId);
+    if (socket.worxstreamUserId != null && String(socket.worxstreamUserId) === target) {
+      return true;
+    }
+    if (socket.user?.id != null && String(socket.user.id) === target) {
+      return true;
+    }
+    return false;
+  }
+
+  // Notify connected clients about a newly arrived mail (Graph webhook)
+  notifyNewMail(worxstreamUserId, email, message) {
+    if (!this.io) {
+      console.log('⚠️ Socket.IO not available for new mail notification');
+      return;
+    }
+
+    try {
+      let emitted = 0;
+      this.io.sockets.sockets.forEach((socket) => {
+        if (this.matchesUser(socket, worxstreamUserId)) {
+          socket.emit('mail:new', {
+            email,
+            provider: 'outlook',
+            message: {
+              id: message.id,
+              from: message.from,
+              to: message.to,
+              subject: message.subject,
+              preview: message.preview,
+              timestamp: message.timestamp,
+              read: message.read,
+              folder: message.folder,
+              important: message.important,
+              flagged: message.flagged,
+              isProcessed: message.isProcessed
+            },
+            timestamp: new Date().toISOString()
+          });
+          emitted += 1;
+        }
+      });
+
+      console.log(`📢 mail:new emitted to ${emitted} socket(s) for user ${worxstreamUserId} (${email})`);
+    } catch (error) {
+      console.error('❌ Error sending new mail notification:', error);
+    }
+  }
 }
 
 // Create a singleton instance

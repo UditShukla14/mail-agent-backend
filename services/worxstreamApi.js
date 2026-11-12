@@ -90,14 +90,7 @@ class WorxstreamApiService {
         },
       });
       
-      console.log(`✅ Token verification successful:`, response);
-      console.log(`🔍 Response structure:`, {
-        hasUser: !!response.user,
-        hasId: !!response.id,
-        hasEmail: !!response.email,
-        responseKeys: Object.keys(response),
-        responseType: typeof response
-      });
+      console.log('✅ Token verification successful');
       
       // The response should already contain the user data structure
       // Check if it has the expected format

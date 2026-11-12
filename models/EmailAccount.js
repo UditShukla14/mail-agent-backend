@@ -42,6 +42,23 @@ const emailAccountSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  // Microsoft Graph change-notification subscription (Outlook push)
+  worxstreamUserId: {
+    type: Number,
+    default: null
+  },
+  graphSubscriptionId: {
+    type: String,
+    default: null
+  },
+  graphSubscriptionExpiresAt: {
+    type: Date,
+    default: null
+  },
+  outlookInboxFolderId: {
+    type: String,
+    default: null
   }
 }, {
   timestamps: true
@@ -53,5 +70,8 @@ emailAccountSchema.index({ userId: 1, email: 1 }, { unique: true });
 // Index for focused items queries
 emailAccountSchema.index({ userId: 1, 'focusedItems.value': 1 });
 emailAccountSchema.index({ userId: 1, 'focusedItems.folderName': 1 });
+
+// Lookup Graph webhook notifications by subscription id
+emailAccountSchema.index({ graphSubscriptionId: 1 }, { sparse: true });
 
 export default mongoose.model('EmailAccount', emailAccountSchema); 

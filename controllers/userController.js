@@ -27,7 +27,7 @@ export const registerUser = async (req, res) => {
     );
 
     const isProduction = process.env.NODE_ENV === 'production';
-    const cookieDomain = isProduction ? '.worxstream.io' : undefined;
+    const cookieDomain = isProduction ? '.worxstream.ai' : undefined;
     const cookieSameSite = isProduction ? 'none' : 'lax';
 
     // Set the token as an HTTP-only cookie for cross-site usage
@@ -80,7 +80,7 @@ export const loginUser = async (req, res) => {
     );
 
     const isProduction = process.env.NODE_ENV === 'production';
-    const cookieDomain = isProduction ? '.worxstream.io' : undefined;
+    const cookieDomain = isProduction ? '.worxstream.ai' : undefined;
     const cookieSameSite = isProduction ? 'none' : 'lax';
 
     // Set the token as an HTTP-only cookie for cross-site usage

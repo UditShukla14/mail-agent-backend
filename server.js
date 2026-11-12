@@ -1,9 +1,11 @@
+import { verifyBearerToken, DEV_USER, isDevFallbackAllowed } from './utils/authVerify.js';
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
+import emailsRoutes from './routes/emails.js';
 import { initMailSocket } from './sockets/mailSocket.js';
 import connectDB from './utils/db.js';
 import emailEnrichmentService from './services/emailEnrichment.js';
@@ -18,10 +20,12 @@ import aiReplyRoutes from './routes/aiReply.js';
 import tokenRefreshRoutes from './routes/tokenRefresh.js';
 import calendarRoutes from './routes/calendar.js';
 import focusRoutes from './routes/focus.js';
+import webhookRoutes from './routes/webhooks.js';
 
 import './services/enrichmentQueueService.js'; // This will initialize the service
 import tokenRefreshService from './services/tokenRefreshService.js';
 import notificationService from './services/notificationService.js';
+import outlookSubscriptionRenewalService from './services/outlookSubscriptionRenewalService.js';
 
 dotenv.config();
 
@@ -33,10 +37,10 @@ const allowedOrigins = [
   'http://localhost:3000', // worXstream frontend dev
   'http://localhost:4173', // Mail agent frontend dev
   'http://localhost:4174', // worXstream frontend dev (Vite)
-  'https://xmail.worxstream.io', // Mail agent subdomain
+  'https://mails.worxstream.ai', // Mail agent subdomain
   'https://worxstream.io',
   'https://app-worxstream-io-react-woba6.ondigitalocean.app', // Main worXstream domain
-  'https://app.worxstream.io' // Main app domain
+  'https://app.worxstream.ai' // Main app domain
 ];
 
 const corsOptions = {
@@ -143,11 +147,15 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(cookieParser());
 
+// Public Microsoft Graph webhooks (no worXstream JWT)
+app.use('/webhooks', webhookRoutes);
+
 // Routes
 app.use('/user', userRoutes);
 app.use('/auth', authRoutes);
 app.use('/account', accountRoutes);
 app.use('/email-analytics', emailAnalyticsRoutes);
+app.use('/emails', emailsRoutes);
 app.use('/email-categories', emailCategoriesRoutes);
 app.use('/ai-reply', aiReplyRoutes);
 app.use('/token-refresh', tokenRefreshRoutes);
@@ -166,87 +174,33 @@ app.get('/', (req, res) => {
 // Initialize socket handlers
 io.use(async (socket, next) => {
   try {
-    console.log('🔐 Socket authentication check for:', socket.id);
-    
-    // Check for authentication token in handshake
+    // Identity comes only from verifying the bearer token with worXstream; user info supplied by the
+    // client (handshake query or payloads) is never trusted.
     const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
-    
     if (!token) {
-      console.log('❌ No token provided for socket connection');
       return next(new Error('Authentication required'));
     }
 
-    // Check for user info in query parameters (from frontend)
-    const userInfoQuery = socket.handshake.query?.userInfo;
-    let userInfo = null;
-    if (userInfoQuery) {
-      try {
-        userInfo = JSON.parse(userInfoQuery);
-        console.log('📋 User info from query:', userInfo);
-      } catch (error) {
-        console.error('Error parsing user info query:', error);
-      }
+    const { user, reason } = await verifyBearerToken(token);
+    if (user) {
+      socket.user = user;
+      socket.token = token;
+      console.log('✅ Socket authenticated for user:', user.email);
+      return next();
     }
 
-    // Verify token with worXstream API
-    try {
-      const worxstreamApiUrl = process.env.WORXSTREAM_API_URL || 'http://localhost:8080';
-      const response = await axios.get(`${worxstreamApiUrl}/api/user-info`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (response.data.success) {
-        socket.user = response.data.user;
-        socket.token = token;
-        console.log('✅ Socket authenticated for user:', socket.user.email);
-        next();
-      } else {
-        console.log('❌ Token verification failed');
-        next(new Error('Invalid token'));
-      }
-    } catch (error) {
-      console.error('❌ Token verification error:', error.message);
-      console.error('❌ Full error details:', {
-        message: error.message,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data,
-        url: `${process.env.WORXSTREAM_API_URL || 'http://localhost:8080'}/api/user-info`
-      });
-      
-      // In development mode, allow connection with fallback
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🔧 Development mode: Allowing socket connection with fallback');
-        // Use user info from headers if available, otherwise use fallback
-        if (userInfo) {
-          socket.user = userInfo;
-          console.log('✅ Using user info from headers for socket authentication');
-        } else {
-          socket.user = { id: 10000000021, email: 'dev@example.com' };
-          console.log('⚠️ Using fallback user info for socket authentication');
-        }
-        socket.token = token;
-        next();
-      } else {
-        // In production, allow connection with user info from query if token verification fails
-        // This is a temporary fix until the worXstream API is properly configured
-        console.log('🔧 Production mode: Allowing socket connection with user info from query');
-        if (userInfo) {
-          socket.user = userInfo;
-          console.log('✅ Using user info from query for socket authentication');
-          socket.token = token;
-          next();
-        } else {
-          console.log('❌ No user info available for fallback authentication');
-          next(new Error('Authentication failed'));
-        }
-      }
+    if (isDevFallbackAllowed() && reason !== 'invalid') {
+      console.log('⚠️ Development mode: worXstream unreachable, using the development user');
+      socket.user = { ...DEV_USER };
+      socket.token = token;
+      return next();
     }
+
+    console.log(`❌ Socket authentication failed (${reason || 'invalid'})`);
+    return next(new Error(reason === 'unavailable' ? 'Authentication service unavailable' : 'Invalid token'));
   } catch (error) {
-    console.error('❌ Socket authentication error:', error);
-    next(error);
+    console.error('❌ Socket authentication error:', error.message);
+    next(new Error('Authentication failed'));
   }
 });
 
@@ -291,4 +245,10 @@ httpServer.listen(PORT, () => {
   // Start the token refresh service
   tokenRefreshService.start();
   console.log('🔄 Token refresh service started');
+
+  // Outlook Graph subscription renewal + one-time backfill for existing accounts
+  outlookSubscriptionRenewalService.start();
+  outlookSubscriptionRenewalService.backfill().catch((err) => {
+    console.error('❌ Outlook subscription startup backfill failed:', err.message);
+  });
 });
