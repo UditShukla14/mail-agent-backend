@@ -141,7 +141,9 @@ async function getMailFolders(accessToken) {
     console.log(`📂 Retrieved ${folders.length} folders`);
     return folders;
   } catch (err) {
-    console.error('❌ Failed to fetch folders:', err?.response?.data || err.message);
+    console.error('❌ Failed to fetch folders:', err?.response?.status, JSON.stringify(err?.response?.data || err.message));
+    // A rejected token is reported to the caller (it can refresh and retry); other failures keep the old empty list.
+    if (err?.response?.status === 401) throw err;
     return [];
   }
 }

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 process.env.NODE_ENV = 'production';
 const { worxstreamApi } = await import('../services/worxstreamApi.js');
 const { authenticateUser } = await import('../middleware/auth.js');
-const { __clearAuthCacheForTests } = await import('../utils/authVerify.js');
+const { __clearAuthCacheForTests, classifyFailure } = await import('../utils/authVerify.js');
 
 const makeRes = () => {
   const res = { statusCode: 200, body: null };
@@ -62,5 +62,31 @@ describe('authenticateUser', () => {
     await run({ authorization: 'Bearer cached' });
     await run({ authorization: 'Bearer cached' });
     assert.equal(calls, 1);
+  });
+});
+
+describe('classifyFailure', () => {
+  it('treats a rejected or redirected token as invalid', () => {
+    for (const status of [302, 401, 403, 404, 419, 422]) assert.equal(classifyFailure(status), 'invalid');
+  });
+  it('treats no answer, timeouts, rate limits and server errors as unavailable', () => {
+    for (const status of [undefined, 408, 429, 500, 502, 503]) assert.equal(classifyFailure(status), 'unavailable');
+  });
+});
+
+describe('extractUserFromUserInfo', () => {
+  let extract;
+  it('accepts every /api/user-info shape the Sign and Chat servers accept', async () => {
+    ({ extractUserFromUserInfo: extract } = await import('../services/worxstreamApi.js'));
+    assert.equal(extract({ success: true, data: { user: { id: 7 } } }).id, 7);
+    assert.equal(extract({ success: true, user: { id: 8 } }).id, 8);
+    assert.equal(extract({ id: 9, email: 'a@b.c' }).id, 9);
+    assert.equal(extract({ data: { id: 10, email: 'a@b.c' } }).id, 10);
+  });
+  it('rejects bodies without a user id', async () => {
+    const { extractUserFromUserInfo } = await import('../services/worxstreamApi.js');
+    assert.equal(extractUserFromUserInfo(null), null);
+    assert.equal(extractUserFromUserInfo('<html>login</html>'), null);
+    assert.equal(extractUserFromUserInfo({ success: true, data: { user: {} } }), null);
   });
 });

@@ -11,7 +11,8 @@ import {
   deleteMessage
 } from '../services/outlookService.js';
 
-import { getToken, getUserTokens } from '../utils/tokenManager.js';
+import { getToken, getUserTokens, refreshSpecificToken } from '../utils/tokenManager.js';
+import { withTokenRefresh, isOutlookAuthError, OUTLOOK_AUTH_MESSAGE } from '../utils/outlookAuthRetry.js';
 import User from '../models/User.js';
 import Email from '../models/email.js';
 import emailEnrichmentService from '../services/emailEnrichment.js';
@@ -23,6 +24,14 @@ export const initMailSocket = (socket, io) => {
 
   const folderPaginationMap = new Map();
   
+  // Folder list with one automatic token refresh when Microsoft rejects the stored token.
+  const loadFolders = (userId, email, token) =>
+    withTokenRefresh(getMailFolders, {
+      accessToken: token,
+      refresh: () => refreshSpecificToken(userId, email, 'outlook'),
+      getFreshToken: () => getToken(userId, email, 'outlook'),
+    });
+
   // Debounce mechanism to prevent rapid-fire requests
   const debounceMap = new Map();
   const DEBOUNCE_DELAY = 1000; // 1 second
@@ -74,18 +83,8 @@ export const initMailSocket = (socket, io) => {
   onAuthed('mail:init', async ({ worxstreamUserId, email }) => {
     try {
       
-      // Check if this user already has an active socket for this email
-      const userSockets = Array.from(io.sockets.sockets.values()).filter(s => 
-        s.worxstreamUserId === worxstreamUserId && s.id !== socket.id
-      );
-      
-      if (userSockets.length > 0) {
-        // Clean up old sockets
-        userSockets.forEach(oldSocket => {
-          oldSocket.disconnect();
-        });
-      }
-      
+      // Several sockets per user are fine (more than one tab or page); they are not disconnected here.
+
       // Store worxstreamUserId on socket for later use
       socket.worxstreamUserId = worxstreamUserId;
     
@@ -96,6 +95,7 @@ export const initMailSocket = (socket, io) => {
       if (!token) {
         // Check if user has any connected accounts
         const userTokens = await getUserTokens(userId);
+        console.warn(`⚠️ No usable Outlook token for user ${userId} / ${email} (connected accounts: ${userTokens.map((t) => t.email).join(', ') || 'none'})`);
         if (userTokens.length === 0) {
           socket.emit('mail:error', 'No email accounts connected. Please connect your email account first.');
           return;
@@ -108,12 +108,12 @@ export const initMailSocket = (socket, io) => {
       // Register this socket with the enrichment service for this user
       emailEnrichmentService.registerSocket(socket);
 
-      const folders = await getMailFolders(token);
+      const folders = await loadFolders(userId, email, token);
       socket.emit('mail:folders', folders);
       
     } catch (error) {
       console.error('❌ Error in mail:init:', error);
-      socket.emit('mail:error', 'Failed to initialize mail service');
+      socket.emit('mail:error', isOutlookAuthError(error) ? OUTLOOK_AUTH_MESSAGE : 'Failed to initialize mail service');
     }
   });
 
@@ -182,6 +182,7 @@ export const initMailSocket = (socket, io) => {
       if (!token) {
         // Check if user has any connected accounts
         const userTokens = await getUserTokens(userId);
+        console.warn(`⚠️ No usable Outlook token for user ${userId} / ${email} (connected accounts: ${userTokens.map((t) => t.email).join(', ') || 'none'})`);
         if (userTokens.length === 0) {
           socket.emit('mail:error', 'No email accounts connected. Please connect your email account first.');
           return;
@@ -191,11 +192,11 @@ export const initMailSocket = (socket, io) => {
         }
       }
 
-      const folders = await getMailFolders(token);
+      const folders = await loadFolders(userId, email, token);
       socket.emit('mail:folders', folders);
     } catch (error) {
       console.error('❌ Error in mail:getFolders:', error);
-      socket.emit('mail:error', 'Failed to get folders');
+      socket.emit('mail:error', isOutlookAuthError(error) ? OUTLOOK_AUTH_MESSAGE : 'Failed to get folders');
     }
   });
 
