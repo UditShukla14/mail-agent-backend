@@ -42,7 +42,7 @@ class WorxstreamApiService {
       const response = await axios(url, config);
       clearTimeout(timeoutId);
 
-      console.log(`✅ worXstream API response:`, response.status, response.data);
+      console.log(`✅ worXstream API response: ${response.status}`);
 
       if (!response.data.success && response.data.error) {
         throw {
@@ -83,10 +83,14 @@ class WorxstreamApiService {
     try {
       console.log(`🔐 Verifying token with worXstream API...`);
       
+      // Accept: application/json makes Laravel answer an unknown/old token with 401 JSON instead of redirecting
+      // to a login page; redirects are not followed so a redirect is read as "token not accepted".
       const response = await this.request('/api/user-info', {
         method: 'GET',
+        maxRedirects: 0,
         headers: {
           Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
         },
       });
       
@@ -100,11 +104,12 @@ class WorxstreamApiService {
           user: response.user || response, // Use response.user if it exists, otherwise use response directly
         };
       } else {
-        console.warn('⚠️ Unexpected response format:', response);
+        // A 200 that is not user data (for example a login page) means the token was not accepted.
+        console.warn('⚠️ Token verification: response is not user data');
         return {
           success: false,
-          error: 'Invalid response format from API',
-          status: 500,
+          error: 'Token not accepted',
+          status: 401,
         };
       }
     } catch (error) {

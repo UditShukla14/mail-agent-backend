@@ -37,9 +37,17 @@ export async function verifyBearerToken(token) {
     cache.set(key, { user: result.user, expires: Date.now() + CACHE_TTL_MS });
     return { user: result.user };
   }
-  // 401/403 from worXstream means the token is bad; anything else (timeout, 5xx) means we could not tell.
-  const status = Number(result?.status);
-  return { user: null, reason: status === 401 || status === 403 ? 'invalid' : 'unavailable' };
+  return { user: null, reason: classifyFailure(result?.status) };
+}
+
+/**
+ * worXstream answered but did not accept the token (401/403, other 4xx, or a redirect to login) -> 'invalid'.
+ * No answer, timeout, rate limit or a server error -> 'unavailable' (we could not tell).
+ */
+export function classifyFailure(status) {
+  const code = Number(status);
+  if (code >= 300 && code < 500 && code !== 408 && code !== 429) return 'invalid';
+  return 'unavailable';
 }
 
 export const __clearAuthCacheForTests = () => cache.clear();
