@@ -5,13 +5,31 @@ dotenv.config();
 
 // API Configuration for worXstream backend
 const WORXSTREAM_API_CONFIG = {
-  baseURL: process.env.WORXSTREAM_API_URL || 'http://localhost:8000',
+  // Same variables and default as the Sign and Chat servers (API_BACKEND_URL, then the production API).
+  baseURL: (
+    process.env.WORXSTREAM_API_URL
+    || process.env.API_BACKEND_URL
+    || process.env.VITE_API_BACKEND_URL
+    || 'https://api.worxstream.ai'
+  ).replace(/\/+$/, ''),
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
   },
 };
+
+/**
+ * The user object from a /api/user-info body. Same shapes the Sign and Chat servers accept:
+ * `{ data: { user } }`, `{ user }`, or the user fields at the top level.
+ */
+export function extractUserFromUserInfo(body) {
+  if (!body || typeof body !== 'object') return null;
+  const nested = body.data && typeof body.data === 'object' ? body.data : null;
+  const candidate = nested?.user ?? body.user ?? (body.id != null || body.email ? body : null) ?? (nested && (nested.id != null || nested.email) ? nested : null);
+  if (!candidate || typeof candidate !== 'object') return null;
+  return candidate.id != null ? candidate : null;
+}
 
 class WorxstreamApiService {
   constructor(config) {
@@ -98,11 +116,9 @@ class WorxstreamApiService {
       
       // The response should already contain the user data structure
       // Check if it has the expected format
-      if (response && (response.user || response.id || response.email)) {
-        return {
-          success: true,
-          user: response.user || response, // Use response.user if it exists, otherwise use response directly
-        };
+      const user = extractUserFromUserInfo(response);
+      if (user) {
+        return { success: true, user };
       } else {
         // A 200 that is not user data (for example a login page) means the token was not accepted.
         console.warn('⚠️ Token verification: response is not user data');

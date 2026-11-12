@@ -240,7 +240,7 @@ const PORT = process.env.PORT || 8000;
 
 httpServer.listen(PORT, () => {
   console.log(`🚀 Mail Agent Backend running on port ${PORT}`);
-  console.log(`🔗 Integrated with worXstream backend: ${process.env.WORXSTREAM_API_URL || 'http://localhost:8080'}`);
+  console.log(`🔗 Integrated with worXstream backend: ${process.env.WORXSTREAM_API_URL || process.env.API_BACKEND_URL || 'https://api.worxstream.ai'}`);
   
   // Start the token refresh service
   tokenRefreshService.start();
