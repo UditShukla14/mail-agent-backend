@@ -34,13 +34,10 @@ const httpServer = createServer(app);
 
 // CORS configuration for worXstream integration
 const allowedOrigins = [
-  'http://localhost:3000', // worXstream frontend dev
-  'http://localhost:4173', // Mail agent frontend dev
-  'http://localhost:4174', // worXstream frontend dev (Vite)
-  'https://mails.worxstream.ai', // Mail agent subdomain
-  'https://worxstream.io',
-  'https://app-worxstream-io-react-woba6.ondigitalocean.app', // Main worXstream domain
-  'https://app.worxstream.ai' // Main app domain
+  'http://localhost:4173', // worXstream web app (local dev)
+  'https://app.worxstream.ai', // worXstream web app (production)
+  // Anything else, comma-separated, e.g. CORS_ORIGINS=https://staging.example.com
+  ...(process.env.CORS_ORIGINS || '').split(',').map((o) => o.trim()).filter(Boolean),
 ];
 
 const corsOptions = {
