@@ -28,6 +28,7 @@ import enrichmentQueueService from '../services/enrichmentQueueService.js';
 import axios from 'axios';
 import emailService from '../services/emailService.js';
 import { saveOutlookMessages, getFolderThreads, syncConversationIds } from '../services/folderSync.js';
+import { startAccountSync, getSyncStatus } from '../services/syncJobs.js';
 import { debug } from '../utils/logger.js';
 
 export const initMailSocket = (socket, io) => {
@@ -265,6 +266,30 @@ export const initMailSocket = (socket, io) => {
       socket.emit('mail:folderSynced', { folderId, fetched: 0, failed: true });
     } finally {
       syncingFolders.delete(lockKey);
+    }
+  });
+
+  // 🔁 Sync the whole account with Outlook in the background (every folder; ids, flags, read state, moves, deletions).
+  // The job runs on the server; the answer and every progress update arrive as `mail:syncAllStatus`.
+  onAuthed('mail:syncAll', async ({ worxstreamUserId, email }) => {
+    if (!email) return socket.emit('mail:error', 'email is required to sync an account');
+    try {
+      const { status } = await startAccountSync(worxstreamUserId, email);
+      socket.emit('mail:syncAllStatus', status);
+    } catch (error) {
+      console.error('❌ Error in mail:syncAll:', error.message);
+      socket.emit('mail:error', error.message || 'Failed to start the sync');
+    }
+  });
+
+  // The latest sync-all status of an account (a page that opens while one is running picks it up from here).
+  onAuthed('mail:getSyncAllStatus', async ({ worxstreamUserId, email }) => {
+    if (!email) return;
+    try {
+      const status = await getSyncStatus(worxstreamUserId, email);
+      if (status) socket.emit('mail:syncAllStatus', status);
+    } catch (error) {
+      console.error('❌ Error in mail:getSyncAllStatus:', error.message);
     }
   });
 

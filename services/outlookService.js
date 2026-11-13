@@ -385,6 +385,66 @@ async function getAttachmentsByMessageId(accessToken, messageId) {
 }
 
 /**
+ * Every folder of the mailbox, sub-folders included (the plain folder list only returns the first top-level folders).
+ * @returns {Promise<Array<{ id: string, displayName: string, path: string }>>}
+ */
+export async function listAllFolders(accessToken) {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const out = [];
+  const walk = async (url, parentPath) => {
+    let next = url;
+    while (next) {
+      const res = await retryTransient(() => axios.get(next, { headers, params: next.includes('?') ? undefined : { $top: 100, $select: 'id,displayName,childFolderCount' } }));
+      for (const f of res.data.value || []) {
+        const path = parentPath ? `${parentPath}/${f.displayName}` : f.displayName;
+        out.push({ id: f.id, displayName: f.displayName, path });
+        if (f.childFolderCount > 0) {
+          await walk(`https://graph.microsoft.com/v1.0/me/mailFolders/${encodeURIComponent(f.id)}/childFolders`, path);
+        }
+      }
+      next = res.data['@odata.nextLink'] || null;
+    }
+  };
+  await walk('https://graph.microsoft.com/v1.0/me/mailFolders', '');
+  return out;
+}
+
+/**
+ * One page (100) of a folder's messages with everything the list shows but not the body. Used by the full sync to
+ * bring the saved copy back in line with Outlook (read state, flags, conversation id, subject, folder).
+ */
+export async function listFolderMessageMeta(accessToken, folderId, nextLink = null) {
+  const url = nextLink || `https://graph.microsoft.com/v1.0/me/mailFolders/${encodeURIComponent(folderId)}/messages`;
+  const res = await retryTransient(() => axios.get(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    params: nextLink ? undefined : {
+      $top: 100,
+      $orderby: 'receivedDateTime desc',
+      $select: 'id,subject,from,toRecipients,ccRecipients,bccRecipients,bodyPreview,receivedDateTime,isRead,importance,flag,conversationId,hasAttachments',
+    },
+  }));
+  const addr = (r) => `${r?.emailAddress?.name || ''} <${r?.emailAddress?.address || ''}>`;
+  return {
+    rows: (res.data.value || []).map((m) => ({
+      id: m.id,
+      from: addr(m.from),
+      to: (m.toRecipients || []).map(addr).join(', '),
+      cc: (m.ccRecipients || []).map(addr).join(', '),
+      bcc: (m.bccRecipients || []).map(addr).join(', '),
+      subject: m.subject || '(No Subject)',
+      preview: m.bodyPreview || '',
+      timestamp: m.receivedDateTime,
+      read: Boolean(m.isRead),
+      important: m.importance === 'high',
+      flagged: m.flag?.flagStatus === 'flagged',
+      conversationId: m.conversationId || '',
+      hasAttachments: Boolean(m.hasAttachments),
+    })),
+    nextLink: res.data['@odata.nextLink'] || null,
+  };
+}
+
+/**
  * Light listing of a folder: only the ids and thread ids, 100 per page. Used to give conversation ids to messages that
  * were saved before threading existed (one Graph call per 100 messages instead of one per message).
  */

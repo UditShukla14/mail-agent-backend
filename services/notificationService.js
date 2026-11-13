@@ -90,6 +90,19 @@ class NotificationService {
     }
   }
 
+  /** Send one event to every open page of a user. Returns how many received it. */
+  notifyUser(worxstreamUserId, event, payload) {
+    if (!this.io) return 0;
+    let sent = 0;
+    this.io.sockets.sockets.forEach((socket) => {
+      if (this.matchesUser(socket, worxstreamUserId)) {
+        socket.emit(event, payload);
+        sent += 1;
+      }
+    });
+    return sent;
+  }
+
   matchesUser(socket, worxstreamUserId) {
     const target = String(worxstreamUserId);
     if (socket.worxstreamUserId != null && String(socket.worxstreamUserId) === target) {

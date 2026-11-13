@@ -27,6 +27,7 @@ import tokenRefreshService from './services/tokenRefreshService.js';
 import notificationService from './services/notificationService.js';
 import outlookSubscriptionRenewalService from './services/outlookSubscriptionRenewalService.js';
 import { debug } from './utils/logger.js';
+import { markInterruptedSyncJobs } from './services/syncJobs.js';
 
 dotenv.config();
 
@@ -240,6 +241,9 @@ httpServer.listen(PORT, () => {
   console.log(`🚀 Mail Agent Backend running on port ${PORT}`);
   console.log(`🔗 Integrated with worXstream backend: ${process.env.WORXSTREAM_API_URL || process.env.API_BACKEND_URL || 'https://api.worxstream.ai'}`);
   
+  // A sync-all left running by a previous process is not running any more
+  markInterruptedSyncJobs().catch((err) => console.error('⚠️ Could not reset sync jobs:', err.message));
+
   // Start the token refresh service
   tokenRefreshService.start();
   console.log('🔄 Token refresh service started');
