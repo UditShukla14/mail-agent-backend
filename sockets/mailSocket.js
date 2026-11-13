@@ -13,6 +13,11 @@ import {
 
 import { getToken, getUserTokens, refreshSpecificToken } from '../utils/tokenManager.js';
 import { withTokenRefresh, isOutlookAuthError, OUTLOOK_AUTH_MESSAGE } from '../utils/outlookAuthRetry.js';
+import { isOutlookUnavailableError, OUTLOOK_UNAVAILABLE_MESSAGE } from '../utils/transientRetry.js';
+
+/** Message for the user when loading from Outlook failed, or the generic one. */
+const outlookFailureMessage = (error, generic) =>
+  isOutlookAuthError(error) ? OUTLOOK_AUTH_MESSAGE : isOutlookUnavailableError(error) ? OUTLOOK_UNAVAILABLE_MESSAGE : generic;
 import User from '../models/User.js';
 import Email from '../models/email.js';
 import emailEnrichmentService from '../services/emailEnrichment.js';
@@ -113,7 +118,7 @@ export const initMailSocket = (socket, io) => {
       
     } catch (error) {
       console.error('❌ Error in mail:init:', error);
-      socket.emit('mail:error', isOutlookAuthError(error) ? OUTLOOK_AUTH_MESSAGE : 'Failed to initialize mail service');
+      socket.emit('mail:error', outlookFailureMessage(error, 'Failed to initialize mail service'));
     }
   });
 
@@ -196,7 +201,68 @@ export const initMailSocket = (socket, io) => {
       socket.emit('mail:folders', folders);
     } catch (error) {
       console.error('❌ Error in mail:getFolders:', error);
-      socket.emit('mail:error', isOutlookAuthError(error) ? OUTLOOK_AUTH_MESSAGE : 'Failed to get folders');
+      socket.emit('mail:error', outlookFailureMessage(error, 'Failed to get folders'));
+    }
+  });
+
+  // 🔄 Sync one folder from Outlook: pull its newest messages (a few pages) into the database, then tell the client.
+  const SYNC_PAGES = 3;
+  const syncingFolders = new Set();
+  onAuthed('mail:syncFolder', async ({ worxstreamUserId, email, folderId }) => {
+    const lockKey = `${worxstreamUserId}:${email}:${folderId}`;
+    if (!email || !folderId) return socket.emit('mail:error', 'email and folderId are required to sync a folder');
+    if (syncingFolders.has(lockKey)) return; // already running; its result will arrive
+    syncingFolders.add(lockKey);
+    try {
+      const token = await getToken(worxstreamUserId, email, 'outlook');
+      if (!token) return socket.emit('mail:error', `Email account ${email} is not connected or has expired.`);
+      const user = await User.findOne({ worxstreamUserId });
+      if (!user) return socket.emit('mail:error', 'User not found');
+
+      const key = `${socket.id}-${folderId}`;
+      folderPaginationMap.delete(key);
+      let next = null;
+      let fetched = 0;
+      for (let page = 1; page <= SYNC_PAGES; page++) {
+        const { messages: pageMessages, nextLink } = await withTokenRefresh(
+          (accessToken) => getMessagesByFolder(accessToken, folderId, next),
+          {
+            accessToken: token,
+            refresh: () => refreshSpecificToken(worxstreamUserId, email, 'outlook'),
+            getFreshToken: () => getToken(worxstreamUserId, email, 'outlook'),
+          },
+        );
+        if (page === 1 && nextLink) folderPaginationMap.set(key, nextLink); // "load more" continues after page 1
+        await Promise.all(pageMessages.map(async (msg) => {
+          try {
+            await Email.findOneAndUpdate(
+              { id: msg.id, email },
+              {
+                $set: {
+                  id: msg.id, userId: user._id, email, from: msg.from || '', to: msg.to || '', cc: msg.cc || '', bcc: msg.bcc || '',
+                  subject: msg.subject || '(No Subject)', content: msg.content || '', preview: msg.preview || '',
+                  timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
+                  read: msg.read || false, folder: folderId, important: msg.important || false, flagged: msg.flagged || false,
+                  updatedAt: new Date(),
+                },
+              },
+              { upsert: true, setDefaultsOnInsert: true },
+            );
+          } catch (error) {
+            console.error(`❌ Failed to save message ${msg.id}:`, error);
+          }
+        }));
+        fetched += pageMessages.length;
+        if (!nextLink) break;
+        next = nextLink;
+      }
+      socket.emit('mail:folderSynced', { folderId, fetched });
+    } catch (error) {
+      console.error('❌ Error in mail:syncFolder:', error);
+      socket.emit('mail:error', outlookFailureMessage(error, 'Failed to sync the folder'));
+      socket.emit('mail:folderSynced', { folderId, fetched: 0, failed: true });
+    } finally {
+      syncingFolders.delete(lockKey);
     }
   });
 
@@ -222,9 +288,10 @@ export const initMailSocket = (socket, io) => {
           const token = await getToken(userId, email, 'outlook');
           if (token) {
             const key = `${socket.id}-${folderId}`;
-            const nextLink = folderPaginationMap.get(key);
-            
-            const { messages: outlookMessages, nextLink: newNextLink } = await getMessagesByFolder(token, folderId, nextLink);
+            // First page: start from the newest page again. A nextLink kept from an earlier load would return page 2.
+            folderPaginationMap.delete(key);
+
+            const { messages: outlookMessages, nextLink: newNextLink } = await getMessagesByFolder(token, folderId, null);
             if (newNextLink) folderPaginationMap.set(key, newNextLink);
             
             // Get user from database

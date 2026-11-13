@@ -1,3 +1,4 @@
+import { retryTransient, isOutlookUnavailableError } from '../utils/transientRetry.js';
 import axios from 'axios';
 import { simpleParser } from 'mailparser';
 
@@ -125,11 +126,11 @@ async function replyAllToEmail(accessToken, { messageId, comment, toRecipients, 
 // get folders with count 
 async function getMailFolders(accessToken) {
   try {
-    const res = await axios.get('https://graph.microsoft.com/v1.0/me/mailFolders', {
+    const res = await retryTransient(() => axios.get('https://graph.microsoft.com/v1.0/me/mailFolders', {
       headers: {
         Authorization: `Bearer ${accessToken}`
       }
-    });
+    }));
 
     const folders = res.data.value.map(folder => ({
       id: folder.id,
@@ -142,8 +143,9 @@ async function getMailFolders(accessToken) {
     return folders;
   } catch (err) {
     console.error('❌ Failed to fetch folders:', err?.response?.status, JSON.stringify(err?.response?.data || err.message));
-    // A rejected token is reported to the caller (it can refresh and retry); other failures keep the old empty list.
-    if (err?.response?.status === 401) throw err;
+    // A rejected token or a Microsoft outage is reported to the caller (it can refresh, or tell the user);
+    // other failures keep the old empty list.
+    if (err?.response?.status === 401 || isOutlookUnavailableError(err)) throw err;
     return [];
   }
 }
@@ -221,9 +223,9 @@ async function getMessagesByFolder(accessToken, folderId, nextLink = null, top =
       ? nextLink
       : `https://graph.microsoft.com/v1.0/me/mailFolders/${folderId}/messages?$top=${top}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bccRecipients,bodyPreview,body,receivedDateTime,isRead,importance,flag,conversationId`;
 
-    const res = await axios.get(url, {
+    const res = await retryTransient(() => axios.get(url, {
       headers: { Authorization: `Bearer ${accessToken}` }
-    });
+    }));
 
     const messages = res.data.value.map(msg => {
       const mappedMsg = {
@@ -257,7 +259,7 @@ async function getMessagesByFolder(accessToken, folderId, nextLink = null, top =
       nextLink: res.data['@odata.nextLink'] || null
     };
   } catch (err) {
-    console.error('❌ Failed to fetch messages:', err?.response?.data || err.message);
+    console.error('❌ Failed to fetch messages:', err?.response?.status, JSON.stringify(err?.response?.data || err.message));
     if (err.response?.data) {
       console.error('❌ Full error response:', err.response.data);
     }
