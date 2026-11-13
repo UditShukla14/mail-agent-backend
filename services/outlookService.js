@@ -163,7 +163,8 @@ const escapeHtml = (t) => String(t).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<
  *
  * @param {string} accessToken
  * @param {string} messageId
- * @param {{ attachments?: 'inline' | 'none' }} [opts] 'none' skips the attachment calls (push notifications do not need them)
+ * @param {{ attachments?: 'inline' | 'meta' | 'none' }} [opts] 'meta' lists the attachments without downloading inline image bytes (the page then
+ *   streams them with fetchInlineImages); 'none' skips the attachment calls (push notifications do not need them)
  */
 async function getMessageById(accessToken, messageId, opts = {}) {
   try {
@@ -192,7 +193,7 @@ async function getMessageById(accessToken, messageId, opts = {}) {
         isInline: Boolean(a.isInline),
         contentBytes: '',
       };
-      if (out.isInline && out.size <= INLINE_BYTES_LIMIT) {
+      if (out.isInline && out.size <= INLINE_BYTES_LIMIT && opts.attachments !== 'meta') {
         try {
           const r = await retryTransient(() => axios.get(`${base}/attachments/${encodeURIComponent(a.id)}`, { headers }));
           out.contentBytes = r.data.contentBytes || '';
@@ -308,6 +309,42 @@ export async function listAttachmentMeta(accessToken, messageId) {
     size: a.size,
     inline: Boolean(a.isInline),
   }));
+}
+
+/**
+ * Inline images of a message (the pictures inside the body: signature logos, screenshots), fetched AFTER the message is
+ * shown. A long thread carries every message's signature images, and Outlook allows only a few requests at once per
+ * mailbox, so they are fetched a few at a time and handed over one by one as they arrive.
+ *
+ * @param {string} accessToken
+ * @param {string} messageId
+ * @param {Array<{ id: string, isInline?: boolean, size?: number }>} attachments  from getMessageById(..., { attachments: 'meta' })
+ * @param {{ concurrency?: number, max?: number, maxBytes?: number, onImage?: (img: { contentId: string, contentType: string, contentBytes: string }) => void }} [opts]
+ * @returns {Promise<number>} how many images were delivered
+ */
+export async function fetchInlineImages(accessToken, messageId, attachments, { concurrency = 3, max = 24, maxBytes = 1.5 * 1024 * 1024, onImage = () => {}, http = axios } = {}) {
+  const todo = (attachments || []).filter((a) => a.isInline && (a.size ?? 0) <= maxBytes).slice(0, max);
+  const base = `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments`;
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  let next = 0;
+  let delivered = 0;
+  const worker = async () => {
+    while (next < todo.length) {
+      const a = todo[next++];
+      try {
+        const r = await retryTransient(() => http.get(`${base}/${encodeURIComponent(a.id)}`, { headers }));
+        const img = { contentId: r.data.contentId || '', contentType: r.data.contentType || 'application/octet-stream', contentBytes: r.data.contentBytes || '' };
+        if (img.contentId && img.contentBytes) {
+          delivered += 1;
+          onImage(img);
+        }
+      } catch (err) {
+        console.warn('⚠️ Could not fetch an inline image:', err?.response?.status || err.message);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, todo.length) }, worker));
+  return delivered;
 }
 
 /** The bytes of one attachment, fetched when the user downloads it. */

@@ -4,7 +4,6 @@ import Email from '../models/email.js';
 import User from '../models/User.js';
 import focusAssignmentService from './focusAssignmentService.js';
 import mongoose from 'mongoose';
-import { embedInlineImages } from '../utils/inlineImages.js';
 
 // ---- recently opened messages (in memory, per process) ----
 const MESSAGE_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -247,13 +246,14 @@ class EmailService {
       if (outlookMessage) {
         processedContent = outlookMessage.content;
       } else {
-        outlookMessage = await getMessageById(token, messageId);
+        // The message comes back at once; its inline images are streamed afterwards (see fetchInlineImages).
+        outlookMessage = await getMessageById(token, messageId, { attachments: 'meta' });
         if (!outlookMessage) {
           console.error(`❌ Message ${messageId} not found in Outlook`);
           throw new Error('Message not found');
         }
-        processedContent = embedInlineImages(outlookMessage.content, outlookMessage.attachments);
-        writeCache(cacheKey, { ...outlookMessage, content: processedContent });
+        processedContent = outlookMessage.content;
+        writeCache(cacheKey, outlookMessage);
       }
 
       const live = dbMessage

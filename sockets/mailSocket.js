@@ -4,6 +4,7 @@ import {
   getMessagesByFolder,
   getConversationMessages,
   getAttachmentContent,
+  fetchInlineImages,
   getFolderThreadIds,
   getMessageById,
   sendEmail,
@@ -31,6 +32,37 @@ import { saveOutlookMessages, getFolderThreads, syncConversationIds } from '../s
 import { startAccountSync, getSyncStatus } from '../services/syncJobs.js';
 import { ensureSubscriptionForAccount } from '../services/outlookSubscriptionService.js';
 import { debug } from '../utils/logger.js';
+
+// Inline images already fetched, so reopening a message shows its pictures at once (small, per process).
+const INLINE_CACHE_MAX = 30;
+const inlineImageCache = new Map(); // `${email}:${messageId}` -> images[]
+
+/** Streams a message's inline images to the page as `mail:inlineImages` ({ messageId, images }), cached afterwards. */
+async function streamInlineImages(socket, worxstreamUserId, email, messageId, attachments) {
+  const inline = (attachments || []).filter((a) => a.isInline);
+  if (inline.length === 0) return;
+  const key = `${email}:${messageId}`;
+  try {
+    const cached = inlineImageCache.get(key);
+    if (cached) return socket.emit('mail:inlineImages', { messageId, images: cached });
+    const token = await getToken(worxstreamUserId, email, 'outlook');
+    if (!token) return;
+    const got = [];
+    await fetchInlineImages(token, messageId, inline, {
+      onImage: (img) => {
+        got.push(img);
+        socket.emit('mail:inlineImages', { messageId, images: [img] });
+      },
+    });
+    if (got.length) {
+      inlineImageCache.delete(key);
+      inlineImageCache.set(key, got);
+      if (inlineImageCache.size > INLINE_CACHE_MAX) inlineImageCache.delete(inlineImageCache.keys().next().value);
+    }
+  } catch (error) {
+    console.warn('⚠️ Streaming inline images failed:', error?.response?.status || error.message);
+  }
+}
 
 export const initMailSocket = (socket, io) => {
 
@@ -372,6 +404,8 @@ export const initMailSocket = (socket, io) => {
 
       if (message) {
         socket.emit('mail:message', message);
+        // The pictures inside the body follow, a few at a time, so the text is never held back by them.
+        streamInlineImages(socket, worxstreamUserId, email, messageId, message.attachments);
       } else {
         socket.emit('mail:error', 'Message not found');
       }
