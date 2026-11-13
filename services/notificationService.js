@@ -1,4 +1,5 @@
 import { Server } from 'socket.io';
+import { debug } from '../utils/logger.js';
 
 class NotificationService {
   constructor() {
@@ -13,7 +14,7 @@ class NotificationService {
   // Notify user about token expiration
   notifyTokenExpiration(worxstreamUserId, email, provider) {
     if (!this.io) {
-      console.log('⚠️ Socket.IO not available for token expiration notification');
+      debug('⚠️ Socket.IO not available for token expiration notification');
       return;
     }
 
@@ -30,7 +31,7 @@ class NotificationService {
         }
       });
 
-      console.log(`📢 Token expiration notification sent to user ${worxstreamUserId} for ${email}`);
+      debug(`📢 Token expiration notification sent to user ${worxstreamUserId} for ${email}`);
     } catch (error) {
       console.error('❌ Error sending token expiration notification:', error);
     }
@@ -39,7 +40,7 @@ class NotificationService {
   // Notify user about successful token refresh
   notifyTokenRefreshed(worxstreamUserId, email, provider) {
     if (!this.io) {
-      console.log('⚠️ Socket.IO not available for token refresh notification');
+      debug('⚠️ Socket.IO not available for token refresh notification');
       return;
     }
 
@@ -56,7 +57,7 @@ class NotificationService {
         }
       });
 
-      console.log(`📢 Token refresh notification sent to user ${worxstreamUserId} for ${email}`);
+      debug(`📢 Token refresh notification sent to user ${worxstreamUserId} for ${email}`);
     } catch (error) {
       console.error('❌ Error sending token refresh notification:', error);
     }
@@ -65,7 +66,7 @@ class NotificationService {
   // Notify user about failed token refresh
   notifyTokenRefreshFailed(worxstreamUserId, email, provider, error) {
     if (!this.io) {
-      console.log('⚠️ Socket.IO not available for token refresh failure notification');
+      debug('⚠️ Socket.IO not available for token refresh failure notification');
       return;
     }
 
@@ -83,7 +84,7 @@ class NotificationService {
         }
       });
 
-      console.log(`📢 Token refresh failure notification sent to user ${worxstreamUserId} for ${email}`);
+      debug(`📢 Token refresh failure notification sent to user ${worxstreamUserId} for ${email}`);
     } catch (error) {
       console.error('❌ Error sending token refresh failure notification:', error);
     }
@@ -103,7 +104,7 @@ class NotificationService {
   // Notify connected clients about a newly arrived mail (Graph webhook)
   notifyNewMail(worxstreamUserId, email, message) {
     if (!this.io) {
-      console.log('⚠️ Socket.IO not available for new mail notification');
+      debug('⚠️ Socket.IO not available for new mail notification');
       return;
     }
 

@@ -4,6 +4,7 @@ import Token from '../models/Token.js';
 import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
 import dotenv from 'dotenv';
+import { debug } from './logger.js';
 
 dotenv.config();
 
@@ -43,7 +44,7 @@ export const getToken = async (worxstreamUserId, email, provider) => {
     const { expires_in, timestamp } = tokenDoc;
 
     const isExpired = Date.now() > timestamp + expires_in * 1000 - 60000;
-    console.log('🔍 Debug: Token expiration check:', {
+    debug('🔍 Debug: Token expiration check:', {
       email,
       isExpired,
       currentTime: Date.now(),
@@ -194,7 +195,7 @@ export const refreshToken = async (refresh_token, provider) => {
 
     const { access_token, refresh_token: new_refresh, expires_in } = res.data;
     
-    console.log(`✅ Token refresh successful for ${provider}:`, {
+    debug(`✅ Token refresh successful for ${provider}:`, {
       hasAccessToken: !!access_token,
       hasRefreshToken: !!new_refresh,
       expiresIn: expires_in

@@ -3,6 +3,7 @@ import EmailAccount from '../models/EmailAccount.js';
 import Email from '../models/email.js';
 import User from '../models/User.js';
 import { updateFocusItemActivity } from '../controllers/focusController.js';
+import { debug } from '../utils/logger.js';
 
 class FocusAssignmentService {
   constructor() {
@@ -61,7 +62,7 @@ class FocusAssignmentService {
 
         if (isMatch) {
           assignedFocusFolder = focusItem.folderName;
-          console.log(`🎯 Email ${emailData.id} assigned to focus folder: ${assignedFocusFolder}`);
+          debug(`🎯 Email ${emailData.id} assigned to focus folder: ${assignedFocusFolder}`);
           
           // Update focus item activity
           await updateFocusItemActivity(userId, email, assignedFocusFolder);
@@ -140,7 +141,7 @@ class FocusAssignmentService {
       );
       
       if (result) {
-        console.log(`✅ Updated focus folder for email ${emailId}: ${focusFolder}`);
+        debug(`✅ Updated focus folder for email ${emailId}: ${focusFolder}`);
         return true;
       }
       return false;

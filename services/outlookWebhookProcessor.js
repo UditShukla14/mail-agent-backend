@@ -9,6 +9,7 @@ import {
   verifyClientState,
   recreateSubscriptionForAccount
 } from './outlookSubscriptionService.js';
+import { debug } from '../utils/logger.js';
 
 function extractMessageId(notification) {
   if (notification.resourceData?.id) {
@@ -65,13 +66,16 @@ async function processCreatedMessage(account, messageId) {
     updatedAt: new Date()
   };
 
+  // Graph can deliver the same notification more than once; only the first one enriches and notifies.
+  const alreadyKnown = await Email.exists({ id: emailData.id, email: account.email });
+
   const saved = await Email.findOneAndUpdate(
     { id: emailData.id, email: account.email },
     { $set: emailData },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
-  console.log(`📬 Saved inbound Outlook message ${saved.id} for ${account.email}`);
+  if (alreadyKnown) return;
 
   try {
     await enrichmentQueueService.addToQueue([saved]);
@@ -84,7 +88,7 @@ async function processCreatedMessage(account, messageId) {
 
 async function processLifecycle(notification, account) {
   const event = notification.lifecycleEvent;
-  console.log(`📡 Lifecycle event "${event}" for subscription ${notification.subscriptionId}`);
+  debug(`📡 Lifecycle event "${event}" for subscription ${notification.subscriptionId}`);
 
   if (event === 'reauthorizationRequired' || event === 'subscriptionRemoved') {
     try {

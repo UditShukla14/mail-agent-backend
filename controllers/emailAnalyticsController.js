@@ -1,6 +1,7 @@
 import Email from '../models/email.js';
 import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
+import { debug } from '../utils/logger.js';
 
 
 // Helper function to ensure consistent data format
@@ -214,7 +215,7 @@ export const getEmailAnalytics = async (req, res) => {
       const emailAccount = await EmailAccount.findOne({ userId: user._id, email: activeEmail });
       
       if (!emailAccount || !emailAccount.categories || emailAccount.categories.length === 0) {
-        console.log('⏸️ Skipping automatic enrichment - no categories configured for user');
+        debug('⏸️ Skipping automatic enrichment - no categories configured for user');
       } else {
         const unenrichedMatchCriteria = { 
           userId: user._id,
@@ -239,7 +240,7 @@ export const getEmailAnalytics = async (req, res) => {
 
         if (unenrichedEmails.length > 0) {
           try {
-            console.log(`🚀 Auto-triggering enrichment for ${unenrichedEmails.length} emails (${emailAccount.categories.length} categories available)`);
+            debug(`🚀 Auto-triggering enrichment for ${unenrichedEmails.length} emails (${emailAccount.categories.length} categories available)`);
             // Use the queue service instead of direct enrichment to prevent infinite loops
             const enrichmentQueueService = await import('../services/enrichmentQueueService.js');
             await enrichmentQueueService.default.addToQueue(unenrichedEmails);

@@ -26,6 +26,7 @@ import './services/enrichmentQueueService.js'; // This will initialize the servi
 import tokenRefreshService from './services/tokenRefreshService.js';
 import notificationService from './services/notificationService.js';
 import outlookSubscriptionRenewalService from './services/outlookSubscriptionRenewalService.js';
+import { debug } from './utils/logger.js';
 
 dotenv.config();
 
@@ -109,12 +110,12 @@ notificationService.setIO(io);
 
 // Memory management and cleanup
 const cleanup = () => {
-  console.log('🧹 Running memory cleanup...');
+  debug('🧹 Running memory cleanup...');
   
   // Clear token cache periodically
   if (global.gc) {
     global.gc();
-    console.log('🗑️ Garbage collection completed');
+    debug('🗑️ Garbage collection completed');
   }
   
   // Clear any accumulated data structures
@@ -182,7 +183,7 @@ io.use(async (socket, next) => {
     if (user) {
       socket.user = user;
       socket.token = token;
-      console.log('✅ Socket authenticated for user:', user.email);
+      debug('✅ Socket authenticated for user:', user.email);
       return next();
     }
 
@@ -202,19 +203,19 @@ io.use(async (socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  console.log('🔌 New client connected:', socket.id, 'User:', socket.user?.email);
+  debug('🔌 New client connected:', socket.id, 'User:', socket.user?.email);
   
   // Log connection event
-  console.log(`📨 Socket connected: ${socket.id} for user: ${socket.user?.email}`);
+  debug(`📨 Socket connected: ${socket.id} for user: ${socket.user?.email}`);
 
   initMailSocket(socket, io);
 
   socket.on('disconnect', () => {
-    console.log('👋 Client disconnected:', socket.id);
+    debug('👋 Client disconnected:', socket.id);
     
     // Clean up user-specific data
     if (socket.worxstreamUserId) {
-      console.log(`🧹 Cleaning up socket data for user: ${socket.worxstreamUserId}`);
+      debug(`🧹 Cleaning up socket data for user: ${socket.worxstreamUserId}`);
       // Remove from enrichment service
       try {
         emailEnrichmentService.unregisterSocket(socket);

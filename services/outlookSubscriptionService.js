@@ -1,8 +1,10 @@
 import axios from 'axios';
+import { timingSafeEqual } from 'crypto';
 import EmailAccount from '../models/EmailAccount.js';
 import User from '../models/User.js';
 import Token from '../models/Token.js';
 import { getToken } from '../utils/tokenManager.js';
+import { debug } from '../utils/logger.js';
 
 const GRAPH_SUBSCRIPTIONS_URL = 'https://graph.microsoft.com/v1.0/subscriptions';
 // Mail subscriptions max ~4230 minutes; keep a small buffer
@@ -108,7 +110,7 @@ export async function createMailSubscription(worxstreamUserId, email, accessToke
     clientState: getClientState()
   };
 
-  console.log(`📡 Creating Graph mail subscription for ${normalizedEmail} → ${notificationUrl}`);
+  debug(`📡 Creating Graph mail subscription for ${normalizedEmail} → ${notificationUrl}`);
 
   const res = await axios.post(GRAPH_SUBSCRIPTIONS_URL, payload, {
     headers: {
@@ -155,7 +157,7 @@ export async function renewSubscription(worxstreamUserId, email, subscriptionId,
     { graphSubscriptionExpiresAt: new Date(res.data.expirationDateTime) }
   );
 
-  console.log(`🔄 Renewed Graph subscription ${subscriptionId} until ${res.data.expirationDateTime}`);
+  debug(`🔄 Renewed Graph subscription ${subscriptionId} until ${res.data.expirationDateTime}`);
   return res.data;
 }
 
@@ -165,7 +167,7 @@ export async function deleteGraphSubscription(accessToken, subscriptionId) {
     await axios.delete(`${GRAPH_SUBSCRIPTIONS_URL}/${subscriptionId}`, {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
-    console.log(`🗑️ Deleted Graph subscription ${subscriptionId}`);
+    debug(`🗑️ Deleted Graph subscription ${subscriptionId}`);
   } catch (err) {
     // 404 means already gone
     if (err.response?.status !== 404) {
@@ -264,7 +266,6 @@ export async function renewExpiringSubscriptions() {
     graphSubscriptionExpiresAt: { $lte: renewBefore }
   });
 
-  console.log(`🔍 Found ${accounts.length} Outlook subscriptions to renew`);
 
   for (const account of accounts) {
     try {
@@ -305,7 +306,9 @@ export async function recreateSubscriptionForAccount(account) {
 
 export function verifyClientState(clientState) {
   try {
-    return clientState === getClientState();
+    const expected = Buffer.from(getClientState());
+    const given = Buffer.from(String(clientState ?? ''));
+    return given.length === expected.length && timingSafeEqual(given, expected);
   } catch {
     return false;
   }

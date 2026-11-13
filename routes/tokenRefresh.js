@@ -2,6 +2,7 @@ import express from 'express';
 import { authenticateUser } from '../middleware/auth.js';
 import tokenRefreshService from '../services/tokenRefreshService.js';
 import { refreshSpecificToken, getUserTokens } from '../utils/tokenManager.js';
+import { debug } from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -25,7 +26,7 @@ router.get('/status', authenticateUser, (req, res) => {
 // Manually trigger token refresh for all tokens
 router.post('/refresh-all', authenticateUser, async (req, res) => {
   try {
-    console.log('🔄 Manual token refresh triggered by user:', req.user.id);
+    debug('🔄 Manual token refresh triggered by user:', req.user.id);
     await tokenRefreshService.manualRefresh();
     
     res.json({
@@ -54,7 +55,7 @@ router.post('/refresh-specific', authenticateUser, async (req, res) => {
       });
     }
 
-    console.log(`🔄 Manual token refresh for ${email} (${provider}) by user:`, worxstreamUserId);
+    debug(`🔄 Manual token refresh for ${email} (${provider}) by user:`, worxstreamUserId);
     
     const success = await refreshSpecificToken(worxstreamUserId, email, provider);
     

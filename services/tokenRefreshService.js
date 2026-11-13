@@ -2,6 +2,7 @@ import Token from '../models/Token.js';
 import EmailAccount from '../models/EmailAccount.js';
 import { refreshToken } from '../utils/tokenManager.js';
 import notificationService from './notificationService.js';
+import { debug } from '../utils/logger.js';
 
 class TokenRefreshService {
   constructor() {
@@ -13,11 +14,11 @@ class TokenRefreshService {
   // Start the background token refresh service
   start() {
     if (this.isRunning) {
-      console.log('🔄 Token refresh service is already running');
+      debug('🔄 Token refresh service is already running');
       return;
     }
 
-    console.log('🚀 Starting token refresh service...');
+    debug('🚀 Starting token refresh service...');
     this.isRunning = true;
 
     // Run initial check
@@ -32,11 +33,11 @@ class TokenRefreshService {
   // Stop the background token refresh service
   stop() {
     if (!this.isRunning) {
-      console.log('🔄 Token refresh service is not running');
+      debug('🔄 Token refresh service is not running');
       return;
     }
 
-    console.log('🛑 Stopping token refresh service...');
+    debug('🛑 Stopping token refresh service...');
     this.isRunning = false;
 
     if (this.interval) {
@@ -48,7 +49,7 @@ class TokenRefreshService {
   // Check and refresh expired tokens
   async checkAndRefreshTokens() {
     try {
-      console.log('🔍 Checking for expired tokens...');
+      debug('🔍 Checking for expired tokens...');
       
       // Find all tokens that are expired or will expire in the next 10 minutes
       const now = Date.now();
@@ -63,17 +64,17 @@ class TokenRefreshService {
         }
       });
 
-      console.log(`🔍 Found ${expiredTokens.length} expired or expiring tokens`);
+      debug(`🔍 Found ${expiredTokens.length} expired or expiring tokens`);
 
       if (expiredTokens.length === 0) {
-        console.log('✅ No tokens need refreshing');
+        debug('✅ No tokens need refreshing');
         return;
       }
 
       // Refresh each expired token
       for (const token of expiredTokens) {
         try {
-          console.log(`🔄 Refreshing token for ${token.email} (${token.provider})`);
+          debug(`🔄 Refreshing token for ${token.email} (${token.provider})`);
           
           const refreshed = await refreshToken(token.refresh_token, token.provider);
           
@@ -85,12 +86,12 @@ class TokenRefreshService {
             token.timestamp = refreshed.timestamp;
             await token.save();
             
-            console.log(`✅ Successfully refreshed token for ${token.email}`);
+            debug(`✅ Successfully refreshed token for ${token.email}`);
             
             // Notify user about successful refresh
             notificationService.notifyTokenRefreshed(token.worxstreamUserId, token.email, token.provider);
           } else {
-            console.log(`❌ Failed to refresh token for ${token.email}`);
+            console.warn(`❌ Failed to refresh token for ${token.email}`);
             
             // Mark the token as expired in the EmailAccount
             try {
@@ -98,7 +99,7 @@ class TokenRefreshService {
                 { email: token.email, provider: token.provider },
                 { isExpired: true }
               );
-              console.log(`⚠️ Marked ${token.email} as expired in EmailAccount`);
+              console.warn(`⚠️ Marked ${token.email} as expired in EmailAccount`);
               
               // Notify user about failed refresh
               notificationService.notifyTokenRefreshFailed(token.worxstreamUserId, token.email, token.provider, new Error('Token refresh failed'));
@@ -111,7 +112,7 @@ class TokenRefreshService {
         }
       }
 
-      console.log('✅ Token refresh check completed');
+      debug('✅ Token refresh check completed');
     } catch (error) {
       console.error('❌ Error in token refresh service:', error);
     }
@@ -119,7 +120,7 @@ class TokenRefreshService {
 
   // Manually trigger a token refresh check
   async manualRefresh() {
-    console.log('🔄 Manual token refresh triggered');
+    debug('🔄 Manual token refresh triggered');
     await this.checkAndRefreshTokens();
   }
 

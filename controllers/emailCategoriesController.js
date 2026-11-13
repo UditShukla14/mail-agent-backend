@@ -1,10 +1,11 @@
 import EmailAccount from '../models/EmailAccount.js';
 import User from '../models/User.js';
+import { debug } from '../utils/logger.js';
 
 // Get categories for a specific email account
 export const getEmailCategories = async (req, res) => {
   try {
-    console.log('🔍 getEmailCategories called with:', {
+    debug('🔍 getEmailCategories called with:', {
       query: req.query,
       user: req.user
     });
@@ -76,7 +77,7 @@ export const getEmailCategories = async (req, res) => {
 // Update categories for a specific email account
 export const updateEmailCategories = async (req, res) => {
   try {
-    console.log('🔧 Backend: updateEmailCategories called with:', {
+    debug('🔧 Backend: updateEmailCategories called with:', {
       body: req.body,
       user: req.user,
       headers: req.headers

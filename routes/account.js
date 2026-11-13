@@ -7,6 +7,7 @@ import EmailAccount from '../models/EmailAccount.js';
 import { authenticateUser } from '../middleware/auth.js';
 import { getUserTokens, deleteToken, refreshSpecificToken } from '../utils/tokenManager.js';
 import { deleteMailSubscriptionForAccount } from '../services/outlookSubscriptionService.js';
+import { debug } from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -17,7 +18,7 @@ router.get('/token/:email', authenticateUser, async (req, res) => {
     const email = req.params.email;
     const provider = req.query.provider || 'outlook'; // Default to outlook
     
-    console.log(`🔍 Getting token for email: ${email}, user: ${worxstreamUserId}, provider: ${provider}`);
+    debug(`🔍 Getting token for email: ${email}, user: ${worxstreamUserId}, provider: ${provider}`);
     
     // Get token from database
     const token = await getToken(worxstreamUserId, email, provider);
@@ -54,14 +55,13 @@ router.get('/accounts', authenticateUser, async (req, res) => {
     const worxstreamUserId = req.user.id;
     const worxstreamUser = req.user;
     
-    console.log(`🔄 Getting accounts for worXstream user: ${worxstreamUserId} (${worxstreamUser.email})`);
-    console.log(`📋 Full user object:`, JSON.stringify(worxstreamUser, null, 2));
+    debug(`🔄 Getting accounts for worXstream user: ${worxstreamUserId} (${worxstreamUser.email})`);
     
     // Check if user exists in mail agent database
     let user = await User.findOne({ worxstreamUserId });
     
     if (!user) {
-      console.log(`📝 Creating new user in mail agent database for worXstream user: ${worxstreamUserId}`);
+      debug(`📝 Creating new user in mail agent database for worXstream user: ${worxstreamUserId}`);
       
       // Create new user in mail agent database
       user = new User({
@@ -76,9 +76,9 @@ router.get('/accounts', authenticateUser, async (req, res) => {
       });
       
       await user.save();
-      console.log(`✅ Created new user in mail agent database: ${user._id}`);
+      debug(`✅ Created new user in mail agent database: ${user._id}`);
     } else {
-      console.log(`✅ Found existing user in mail agent database: ${user._id}`);
+      debug(`✅ Found existing user in mail agent database: ${user._id}`);
     }
     
     // Get email accounts from EmailAccount model (like original mail-agent)
@@ -92,7 +92,7 @@ router.get('/accounts', authenticateUser, async (req, res) => {
     for (const token of tokens) {
       const existingAccount = emailAccounts.find(account => account.email === token.email);
       if (!existingAccount) {
-        console.log(`🔄 Creating missing EmailAccount record for ${token.email}`);
+        debug(`🔄 Creating missing EmailAccount record for ${token.email}`);
         try {
           const newEmailAccount = new EmailAccount({
             userId: user._id,
@@ -101,7 +101,7 @@ router.get('/accounts', authenticateUser, async (req, res) => {
             isActive: true
           });
           await newEmailAccount.save();
-          console.log(`✅ Created EmailAccount record for ${token.email}`);
+          debug(`✅ Created EmailAccount record for ${token.email}`);
           emailAccounts.push(newEmailAccount);
         } catch (error) {
           console.error(`❌ Failed to create EmailAccount record for ${token.email}:`, error);
@@ -123,7 +123,7 @@ router.get('/accounts', authenticateUser, async (req, res) => {
       };
     });
     
-    console.log(`📧 Found ${accounts.length} email accounts for user: ${worxstreamUserId}`);
+    debug(`📧 Found ${accounts.length} email accounts for user: ${worxstreamUserId}`);
     
     res.json({ 
       success: true,
@@ -153,7 +153,7 @@ router.post('/refresh-token', authenticateUser, async (req, res) => {
       });
     }
 
-    console.log(`🔄 Refreshing token for: ${email} (${provider}) for worXstream user: ${worxstreamUserId}`);
+    debug(`🔄 Refreshing token for: ${email} (${provider}) for worXstream user: ${worxstreamUserId}`);
 
     const success = await refreshSpecificToken(worxstreamUserId, email, provider);
     
@@ -191,14 +191,14 @@ router.delete('/unlink', authenticateUser, async (req, res) => {
       });
     }
 
-    console.log(`🔄 Unlinking account: ${email} for worXstream user: ${worxstreamUserId}`);
-    console.log(`🔍 Request body:`, req.body);
-    console.log(`🔍 User ID type:`, typeof worxstreamUserId, 'Value:', worxstreamUserId);
-    console.log(`🔍 Email:`, email, 'Provider:', provider);
+    debug(`🔄 Unlinking account: ${email} for worXstream user: ${worxstreamUserId}`);
+    debug(`🔍 Request body:`, req.body);
+    debug(`🔍 User ID type:`, typeof worxstreamUserId, 'Value:', worxstreamUserId);
+    debug(`🔍 Email:`, email, 'Provider:', provider);
 
     // Find the user to get their MongoDB _id
     const user = await User.findOne({ worxstreamUserId });
-    console.log(`🔍 User lookup result:`, user ? 'Found' : 'Not found');
+    debug(`🔍 User lookup result:`, user ? 'Found' : 'Not found');
     if (!user) {
       return res.status(404).json({ 
         success: false,
@@ -208,7 +208,7 @@ router.delete('/unlink', authenticateUser, async (req, res) => {
 
     // Check what tokens exist for this user
     const userTokens = await getUserTokens(worxstreamUserId);
-    console.log(`🔍 Available tokens for user:`, userTokens.map(t => ({ email: t.email, provider: t.provider })));
+    debug(`🔍 Available tokens for user:`, userTokens.map(t => ({ email: t.email, provider: t.provider })));
 
     // Tear down Graph webhook subscription before deleting the token
     if (!provider || provider === 'outlook') {
@@ -221,7 +221,7 @@ router.delete('/unlink', authenticateUser, async (req, res) => {
     
     // Delete the token for this account
     const tokenDeleted = await deleteToken(worxstreamUserId, email, provider);
-    console.log(`🔍 Token deletion result:`, tokenDeleted);
+    debug(`🔍 Token deletion result:`, tokenDeleted);
     
     if (!tokenDeleted) {
       return res.status(404).json({ 
@@ -242,9 +242,9 @@ router.delete('/unlink', authenticateUser, async (req, res) => {
       email: email 
     });
 
-    console.log(`✅ Successfully unlinked account: ${email}`);
-    console.log(`📧 Deleted ${emailResult.deletedCount} emails for account: ${email}`);
-    console.log(`🏷️ Deleted ${emailAccountResult.deletedCount} email account record (with categories) for account: ${email}`);
+    debug(`✅ Successfully unlinked account: ${email}`);
+    debug(`📧 Deleted ${emailResult.deletedCount} emails for account: ${email}`);
+    debug(`🏷️ Deleted ${emailAccountResult.deletedCount} email account record (with categories) for account: ${email}`);
 
     res.json({ 
       success: true, 

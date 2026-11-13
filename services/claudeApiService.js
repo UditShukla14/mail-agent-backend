@@ -1,6 +1,7 @@
 // services/claudeApiService.js
 import { RateLimiter } from 'limiter';
 import { ANTHROPIC_MODEL } from '../utils/anthropicConfig.js';
+import { debug } from '../utils/logger.js';
 
 // Rate limiting configuration
 const RATE_LIMIT = {
@@ -26,7 +27,7 @@ let lastResetTime = Date.now();
 setInterval(() => {
   currentTokenUsage = 0;
   lastResetTime = Date.now();
-  console.log('🔄 Reset Claude API token usage counter');
+  debug('🔄 Reset Claude API token usage counter');
 }, 60000);
 
 // Estimate token count
@@ -48,7 +49,7 @@ async function checkRateLimit(content) {
   // If we're close to the limit, wait
   if (timeSinceReset < 60000 && 
       (currentTokenUsage + estimatedTokens) > (RATE_LIMIT.tokensPerMinute * (1 - buffer))) {
-    console.log(`⏳ Rate limit buffer reached. Current usage: ${currentTokenUsage}, Estimated: ${estimatedTokens}`);
+    debug(`⏳ Rate limit buffer reached. Current usage: ${currentTokenUsage}, Estimated: ${estimatedTokens}`);
     return false;
   }
   
@@ -66,7 +67,7 @@ async function makeClaudeApiCall(prompt, retryCount = 0) {
       throw new Error('Rate limit exceeded');
     }
 
-    console.log(`🔄 Making Claude API call (attempt ${retryCount + 1})`);
+    debug(`🔄 Making Claude API call (attempt ${retryCount + 1})`);
     
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -106,7 +107,7 @@ async function makeClaudeApiCall(prompt, retryCount = 0) {
       if (response.status === 429 || response.status === 529) {
         if (retryCount < RATE_LIMIT.maxRetries) {
           const delay = RATE_LIMIT.retryDelay * Math.pow(2, retryCount);
-          console.log(`⏳ Rate limited, waiting ${delay/1000} seconds before retry ${retryCount + 1}/${RATE_LIMIT.maxRetries}`);
+          debug(`⏳ Rate limited, waiting ${delay/1000} seconds before retry ${retryCount + 1}/${RATE_LIMIT.maxRetries}`);
           await new Promise(resolve => setTimeout(resolve, delay));
           return makeClaudeApiCall(prompt, retryCount + 1);
         }
@@ -122,7 +123,7 @@ async function makeClaudeApiCall(prompt, retryCount = 0) {
       throw new Error('Invalid response format from Claude API');
     }
 
-    console.log(`✅ Claude API call successful`);
+    debug(`✅ Claude API call successful`);
     return data.content[0].text;
 
   } catch (error) {
@@ -130,7 +131,7 @@ async function makeClaudeApiCall(prompt, retryCount = 0) {
     
     if (retryCount < RATE_LIMIT.maxRetries) {
       const delay = RATE_LIMIT.retryDelay * Math.pow(2, retryCount);
-      console.log(`⏳ Waiting ${delay/1000} seconds before retry ${retryCount + 1}/${RATE_LIMIT.maxRetries}`);
+      debug(`⏳ Waiting ${delay/1000} seconds before retry ${retryCount + 1}/${RATE_LIMIT.maxRetries}`);
       await new Promise(resolve => setTimeout(resolve, delay));
       return makeClaudeApiCall(prompt, retryCount + 1);
     }
@@ -141,7 +142,7 @@ async function makeClaudeApiCall(prompt, retryCount = 0) {
 
 // Analyze a single email
 export async function analyzeEmail(email) {
-  console.log(`🔍 Analyzing email: ${email.id}`);
+  debug(`🔍 Analyzing email: ${email.id}`);
   
   const prompt = `Analyze this email and provide insights:
 
@@ -234,7 +235,7 @@ Please respond with only the JSON object, no additional text.`;
         return `"actionItems": [${itemList.join(', ')}]`;
       });
       
-      console.log('🔧 Attempting to parse cleaned response:', cleanedResponse);
+      debug('🔧 Attempting to parse cleaned response:', cleanedResponse);
       const analysis = JSON.parse(cleanedResponse);
       
       // Validate that we have the required fields
@@ -287,7 +288,7 @@ Please respond with only the JSON object, no additional text.`;
 
 // Analyze a batch of emails
 export async function analyzeEmailBatch(emails) {
-  console.log(`🔄 Analyzing batch of ${emails.length} emails`);
+  debug(`🔄 Analyzing batch of ${emails.length} emails`);
   
   const batchPrompt = `Analyze these emails and provide a JSON array response. Each email should have the following structure:
 {

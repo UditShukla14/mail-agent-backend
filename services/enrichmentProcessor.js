@@ -1,5 +1,6 @@
 import emailEnrichmentService from './emailEnrichment.js';
 import Email from '../models/email.js';
+import { debug } from '../utils/logger.js';
 
 // Configuration
 const CONFIG = {
@@ -14,29 +15,29 @@ async function processEmailWithRetry(email, retryCount = 0, emitCallback = null)
     // Try to emit analyzing status (but don't fail if socket is not available)
     try {
       if (emitCallback) {
-        console.log(`📡 Calling emitCallback for analyzing status for email ${email.id}`);
+        debug(`📡 Calling emitCallback for analyzing status for email ${email.id}`);
         emitCallback('mail:enrichmentStatus', {
           messageId: email.id,
           status: 'analyzing',
           message: 'Analyzing email content...'
         });
       } else {
-        console.log(`⚠️ No emitCallback available for analyzing status for email ${email.id}`);
+        debug(`⚠️ No emitCallback available for analyzing status for email ${email.id}`);
       }
     } catch (socketError) {
-      console.log('📡 Socket not available for analyzing status, continuing with processing...');
+      debug('📡 Socket not available for analyzing status, continuing with processing...');
     }
 
     // Use our custom enrichment service with database categories instead of hardcoded ones
-    console.log(`🔍 Processing email ${email.id} with custom enrichment service`);
+    debug(`🔍 Processing email ${email.id} with custom enrichment service`);
     const updatedEmail = await emailEnrichmentService.enrichEmail(email, false);
     
-    console.log(`✅ Email ${email.id} processed and saved to database successfully`);
+    debug(`✅ Email ${email.id} processed and saved to database successfully`);
     
     // Try to emit completion status (but don't fail if socket is not available)
     try {
       if (emitCallback) {
-        console.log(`📡 Calling emitCallback for completion status for email ${email.id}`);
+        debug(`📡 Calling emitCallback for completion status for email ${email.id}`);
         emitCallback('mail:enrichmentStatus', {
           messageId: email.id,
           status: 'completed',
@@ -45,10 +46,10 @@ async function processEmailWithRetry(email, retryCount = 0, emitCallback = null)
           email: updatedEmail
         });
       } else {
-        console.log(`⚠️ No emitCallback available for completion status for email ${email.id}`);
+        debug(`⚠️ No emitCallback available for completion status for email ${email.id}`);
       }
     } catch (socketError) {
-      console.log(`📡 Socket not available for completion status for email ${email.id}, but data is saved to database`);
+      debug(`📡 Socket not available for completion status for email ${email.id}, but data is saved to database`);
     }
     
     return { success: true, data: updatedEmail };
@@ -57,7 +58,7 @@ async function processEmailWithRetry(email, retryCount = 0, emitCallback = null)
     
     if (retryCount < CONFIG.maxRetries) {
       const delay = CONFIG.retryDelay * Math.pow(2, retryCount); // Exponential backoff
-      console.log(`⏳ Waiting ${delay/1000} seconds before retry...`);
+      debug(`⏳ Waiting ${delay/1000} seconds before retry...`);
       await new Promise(resolve => setTimeout(resolve, delay));
       return processEmailWithRetry(email, retryCount + 1, emitCallback);
     }
@@ -72,12 +73,12 @@ async function processEmailWithRetry(email, retryCount = 0, emitCallback = null)
       }
     });
 
-    console.log(`❌ Email ${email.id} failed after ${CONFIG.maxRetries} attempts, error saved to database`);
+    console.warn(`❌ Email ${email.id} failed after ${CONFIG.maxRetries} attempts, error saved to database`);
 
     // Try to emit error status (but don't fail if socket is not available)
     try {
       if (emitCallback) {
-        console.log(`📡 Calling emitCallback for error status for email ${email.id}`);
+        debug(`📡 Calling emitCallback for error status for email ${email.id}`);
         emitCallback('mail:enrichmentStatus', {
           messageId: email.id,
           status: 'error',
@@ -85,10 +86,10 @@ async function processEmailWithRetry(email, retryCount = 0, emitCallback = null)
           error: true
         });
       } else {
-        console.log(`⚠️ No emitCallback available for error status for email ${email.id}`);
+        debug(`⚠️ No emitCallback available for error status for email ${email.id}`);
       }
     } catch (socketError) {
-      console.log(`📡 Socket not available for error status for email ${email.id}, but error is saved to database`);
+      debug(`📡 Socket not available for error status for email ${email.id}, but error is saved to database`);
     }
     
     return { success: false, error };
@@ -97,13 +98,13 @@ async function processEmailWithRetry(email, retryCount = 0, emitCallback = null)
 
 // Process a batch of emails
 export async function processEnrichmentBatch(emails, emitCallback = null) {
-  console.log(`🔄 Processing batch of ${emails.length} emails`);
+  debug(`🔄 Processing batch of ${emails.length} emails`);
   
   // Process emails in chunks
   const results = [];
   for (let i = 0; i < emails.length; i += CONFIG.batchSize) {
     const chunk = emails.slice(i, i + CONFIG.batchSize);
-    console.log(`📧 Processing chunk of ${chunk.length} emails`);
+    debug(`📧 Processing chunk of ${chunk.length} emails`);
     
     const chunkResults = await Promise.allSettled(
       chunk.map(email => processEmailWithRetry(email, 0, emitCallback))
@@ -113,7 +114,7 @@ export async function processEnrichmentBatch(emails, emitCallback = null) {
     // Add a delay between chunks
     if (i + CONFIG.batchSize < emails.length) {
       const delay = 30000; // 30 seconds delay between chunks
-      console.log(`⏳ Waiting ${delay/1000} seconds before next chunk...`);
+      debug(`⏳ Waiting ${delay/1000} seconds before next chunk...`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }

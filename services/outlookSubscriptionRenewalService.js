@@ -2,6 +2,7 @@ import {
   renewExpiringSubscriptions,
   backfillMissingSubscriptions
 } from './outlookSubscriptionService.js';
+import { debug } from '../utils/logger.js';
 
 class OutlookSubscriptionRenewalService {
   constructor() {
@@ -13,7 +14,7 @@ class OutlookSubscriptionRenewalService {
 
   start() {
     if (this.isRunning) {
-      console.log('📡 Outlook subscription renewal service is already running');
+      debug('📡 Outlook subscription renewal service is already running');
       return;
     }
 
@@ -22,7 +23,7 @@ class OutlookSubscriptionRenewalService {
       return;
     }
 
-    console.log('🚀 Starting Outlook subscription renewal service...');
+    debug('🚀 Starting Outlook subscription renewal service...');
     this.isRunning = true;
 
     // Initial renew + backfill (non-blocking)
@@ -40,7 +41,7 @@ class OutlookSubscriptionRenewalService {
       clearInterval(this.interval);
       this.interval = null;
     }
-    console.log('🛑 Outlook subscription renewal service stopped');
+    debug('🛑 Outlook subscription renewal service stopped');
   }
 
   async runCycle() {

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { google } from 'googleapis';
 import { simpleParser } from 'mailparser';
+import { debug } from '../utils/logger.js';
 
 // Initialize Gmail API client
 const getGmailClient = (accessToken) => {
@@ -24,7 +25,7 @@ async function getMailFolders(accessToken) {
       unreadItemCount: label.messagesUnread || 0
     }));
 
-    console.log(`📂 Retrieved ${folders.length} Gmail labels`);
+    debug(`📂 Retrieved ${folders.length} Gmail labels`);
     return folders;
   } catch (err) {
     console.error('❌ Failed to fetch Gmail labels:', err?.response?.data || err.message);

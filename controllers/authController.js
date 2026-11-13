@@ -5,6 +5,7 @@ import { saveToken, getToken } from '../utils/tokenManager.js';
 import { google } from 'googleapis';
 import { authenticateUser } from '../middleware/auth.js';
 import { createMailSubscription } from '../services/outlookSubscriptionService.js';
+import { debug } from '../utils/logger.js';
 
 dotenv.config();
 
@@ -77,7 +78,7 @@ export const outlookRedirect = async (req, res) => {
   const code = req.query.code;
   let state;
 
-  console.log('Received query:', req.query);
+  debug('Received query:', req.query);
 
   try {
     state = JSON.parse(Buffer.from(req.query.state, 'base64').toString());
@@ -92,7 +93,7 @@ export const outlookRedirect = async (req, res) => {
   }
 
   try {
-    console.log('🔄 Exchanging code for token...');
+    debug('🔄 Exchanging code for token...');
     const tokenRes = await axios.post(
       `https://login.microsoftonline.com/common/oauth2/v2.0/token`,
       new URLSearchParams({
@@ -106,30 +107,30 @@ export const outlookRedirect = async (req, res) => {
     );
 
     const { access_token, refresh_token, expires_in } = tokenRes.data;
-    console.log('✅ Token received from Microsoft');
+    debug('✅ Token received from Microsoft');
 
-    console.log('🔄 Fetching user profile...');
+    debug('🔄 Fetching user profile...');
     const profileRes = await axios.get('https://graph.microsoft.com/v1.0/me', {
       headers: { Authorization: `Bearer ${access_token}` }
     });
 
     const outlookUser = profileRes.data;
     const email = outlookUser.mail || outlookUser.userPrincipalName;
-    console.log(`✅ User profile fetched: ${email}`);
+    debug(`✅ User profile fetched: ${email}`);
 
-    console.log('🔄 Saving tokens...');
+    debug('🔄 Saving tokens...');
     const saved = await saveToken(worxstreamUserId, email, { access_token, refresh_token, expires_in }, 'outlook');
     if (!saved) {
       throw new Error('Failed to save token');
     }
-    console.log('✅ Tokens saved successfully');
+    debug('✅ Tokens saved successfully');
 
-    console.log('🔄 Verifying token...');
+    debug('🔄 Verifying token...');
     const token = await getToken(worxstreamUserId, email, 'outlook');
     if (!token) {
       throw new Error('Token verification failed');
     }
-    console.log('✅ Token verified');
+    debug('✅ Token verified');
 
     // Subscribe to Inbox change notifications for instant mail push
     try {
@@ -275,7 +276,7 @@ export const gmailRedirect = async (req, res) => {
   }
 
   try {
-    console.log('🔄 Exchanging code for Gmail token...');
+    debug('🔄 Exchanging code for Gmail token...');
     const oauth2Client = new google.auth.OAuth2(
       GMAIL_CLIENT_ID,
       GMAIL_CLIENT_SECRET,
@@ -284,9 +285,9 @@ export const gmailRedirect = async (req, res) => {
 
     const { tokens } = await oauth2Client.getToken(code);
     const { access_token, refresh_token, expiry_date } = tokens;
-    console.log('✅ Token received from Google');
+    debug('✅ Token received from Google');
 
-    console.log('🔄 Fetching user profile...');
+    debug('🔄 Fetching user profile...');
     const oauth2 = google.oauth2({
       auth: oauth2Client,
       version: 'v2'
@@ -294,9 +295,9 @@ export const gmailRedirect = async (req, res) => {
 
     const profile = await oauth2.userinfo.get();
     const email = profile.data.email;
-    console.log(`✅ User profile fetched: ${email}`);
+    debug(`✅ User profile fetched: ${email}`);
 
-    console.log('🔄 Saving tokens...');
+    debug('🔄 Saving tokens...');
     const saved = await saveToken(worxstreamUserId, email, {
       access_token,
       refresh_token,
@@ -306,14 +307,14 @@ export const gmailRedirect = async (req, res) => {
     if (!saved) {
       throw new Error('Failed to save token');
     }
-    console.log('✅ Tokens saved successfully');
+    debug('✅ Tokens saved successfully');
 
-    console.log('🔄 Verifying token...');
+    debug('🔄 Verifying token...');
     const token = await getToken(worxstreamUserId, email, 'gmail');
     if (!token) {
       throw new Error('Token verification failed');
     }
-    console.log('✅ Token verified');
+    debug('✅ Token verified');
 
     if (callbackUrl) {
       const redirectUrl = new URL(callbackUrl);
@@ -383,13 +384,13 @@ export const handleCallback = async (req, res) => {
   }
 
   try {
-    console.log(`🔄 Verifying account: ${email} (${provider})`);
+    debug(`🔄 Verifying account: ${email} (${provider})`);
     const token = await getToken(worxstreamUserId, email, provider);
     if (!token) {
       throw new Error('Account not found');
     }
 
-    console.log(`✅ Account verified: ${email}`);
+    debug(`✅ Account verified: ${email}`);
     return res.json({ 
       success: true, 
       email,

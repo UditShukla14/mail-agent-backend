@@ -1,5 +1,6 @@
 import express from 'express';
 import { processOutlookNotifications } from '../services/outlookWebhookProcessor.js';
+import { debug } from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -14,7 +15,7 @@ router.post('/outlook/mail', async (req, res) => {
       ? req.query.validationToken[0]
       : req.query.validationToken;
 
-    console.log('📡 Graph webhook validation request received');
+    debug('📡 Graph webhook validation request received');
     res.set('Content-Type', 'text/plain');
     return res.status(200).send(token);
   }

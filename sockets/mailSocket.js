@@ -24,6 +24,7 @@ import emailEnrichmentService from '../services/emailEnrichment.js';
 import enrichmentQueueService from '../services/enrichmentQueueService.js';
 import axios from 'axios';
 import emailService from '../services/emailService.js';
+import { debug } from '../utils/logger.js';
 
 export const initMailSocket = (socket, io) => {
 
@@ -126,7 +127,7 @@ export const initMailSocket = (socket, io) => {
   // New handler for enriching specific emails
   onAuthed('mail:enrichEmails', async ({ worxstreamUserId, email, messageIds, forceReanalyze = false }) => {
     try {
-      console.log('🔍 Enrichment request received:', { 
+      debug('🔍 Enrichment request received:', { 
         worxstreamUserId, 
         email, 
         messageIds: messageIds.length, 

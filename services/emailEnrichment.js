@@ -3,6 +3,7 @@ import emailService from './emailService.js';
 import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
 import { makeClaudeApiCall } from './claudeApiService.js';
+import { debug } from '../utils/logger.js';
 
 class EmailEnrichmentService {
   constructor() {
@@ -38,11 +39,11 @@ class EmailEnrichmentService {
 
       // Skip if already enriched and not forcing reprocess
       if (!forceReprocess && email.isProcessed && email.aiMeta?.summary) {
-        console.log('⏭️ Email already enriched, skipping:', email.id);
+        debug('⏭️ Email already enriched, skipping:', email.id);
         return email;
       }
 
-      console.log('🚀 Starting email enrichment for:', email.id);
+      debug('🚀 Starting email enrichment for:', email.id);
       
       // Get user to find their socket
       const user = await User.findById(email.userId);
@@ -122,7 +123,7 @@ class EmailEnrichmentService {
 
       // Emit completion status to specific user
       if (userSocket) {
-        console.log(`📤 Emitting enrichment status for message ${email.id} to socket ${userSocket.id}`);
+        debug(`📤 Emitting enrichment status for message ${email.id} to socket ${userSocket.id}`);
         userSocket.emit('mail:enrichmentStatus', {
           messageId: email.id,
           status: 'completed',
@@ -130,19 +131,19 @@ class EmailEnrichmentService {
           aiMeta: cleanedAnalysis,
           email: updatedEmail
         });
-        console.log(`✅ Enrichment status emitted successfully for message ${email.id}`);
+        debug(`✅ Enrichment status emitted successfully for message ${email.id}`);
       } else {
-        console.log(`❌ No user socket found for message ${email.id}`);
+        debug(`❌ No user socket found for message ${email.id}`);
       }
 
-      console.log('✅ Email enrichment completed:', email.id);
+      debug('✅ Email enrichment completed:', email.id);
       return updatedEmail;
     } catch (error) {
       console.error('❌ Email enrichment failed:', error);
       
       // Check if this is a "no categories" error
       if (error.message.includes('No categories defined yet')) {
-        console.log('⏭️ Email enrichment skipped - user needs to create categories first');
+        debug('⏭️ Email enrichment skipped - user needs to create categories first');
         
         // Update email to indicate it's waiting for categories
         await Email.findByIdAndUpdate(email._id, {
@@ -206,45 +207,44 @@ class EmailEnrichmentService {
     }
     
     // Socket is already registered with IO, just log for tracking
-    console.log(`📡 Socket registered for user: ${socket.worxstreamUserId} with socket ID: ${socket.id}`);
+    debug(`📡 Socket registered for user: ${socket.worxstreamUserId} with socket ID: ${socket.id}`);
     
     // Verify the socket is actually in the IO sockets collection
     const sockets = Array.from(this.io.sockets.sockets.values());
     const foundSocket = sockets.find(s => s.id === socket.id);
     if (foundSocket) {
-      console.log(`✅ Socket ${socket.id} confirmed in IO sockets collection`);
+      debug(`✅ Socket ${socket.id} confirmed in IO sockets collection`);
     } else {
-      console.log(`❌ Socket ${socket.id} not found in IO sockets collection`);
+      debug(`❌ Socket ${socket.id} not found in IO sockets collection`);
     }
   }
 
   // Helper method to find a user's socket
   findUserSocket(worxstreamUserId) {
     if (!this.io) {
-      console.log('❌ IO not available for socket lookup');
+      debug('❌ IO not available for socket lookup');
       return null;
     }
     
     // Get all connected sockets
     const sockets = Array.from(this.io.sockets.sockets.values());
-    console.log(`🔍 Looking for socket for user ${worxstreamUserId}, total sockets: ${sockets.length}`);
+    debug(`🔍 Looking for socket for user ${worxstreamUserId}, total sockets: ${sockets.length}`);
     
     // Find the socket that has this worxstreamUserId (handle both string and number types)
     const userSocket = sockets.find(socket => {
       const socketUserId = socket.worxstreamUserId;
       const matches = String(socketUserId) === String(worxstreamUserId);
       if (matches) {
-        console.log(`✅ Found socket for user ${worxstreamUserId}: ${socket.id}`);
-        console.log(`📧 Socket details: connected=${socket.connected}, userInfo=${JSON.stringify(socket.userInfo)}`);
+        debug(`✅ Found socket for user ${worxstreamUserId}: ${socket.id}`);
       }
       return matches;
     });
     
     if (!userSocket) {
-      console.log(`❌ No socket found for user ${worxstreamUserId}`);
+      debug(`❌ No socket found for user ${worxstreamUserId}`);
       // Log all available sockets for debugging
       sockets.forEach(socket => {
-        console.log(`📡 Socket ${socket.id}: worxstreamUserId = ${socket.worxstreamUserId}, connected = ${socket.connected}`);
+        debug(`📡 Socket ${socket.id}: worxstreamUserId = ${socket.worxstreamUserId}, connected = ${socket.connected}`);
       });
     }
     
@@ -254,22 +254,22 @@ class EmailEnrichmentService {
   // Unregister a socket when it disconnects
   unregisterSocket(socket) {
     if (!this.io) {
-      console.log('⚠️ IO not available for socket unregistration');
+      debug('⚠️ IO not available for socket unregistration');
       return;
     }
     
-    console.log(`📡 Unregistering socket: ${socket.id} for user: ${socket.worxstreamUserId}`);
+    debug(`📡 Unregistering socket: ${socket.id} for user: ${socket.worxstreamUserId}`);
     
     // The socket is automatically removed from IO when it disconnects
     // This method is mainly for logging and cleanup purposes
     if (socket.worxstreamUserId) {
-      console.log(`🧹 Socket cleanup completed for user: ${socket.worxstreamUserId}`);
+      debug(`🧹 Socket cleanup completed for user: ${socket.worxstreamUserId}`);
     }
   }
 
   async enrichBatch(emails, socket) {
     try {
-      console.log(`🔄 Starting batch enrichment for ${emails.length} emails`);
+      debug(`🔄 Starting batch enrichment for ${emails.length} emails`);
 
       // Get the worxstreamUserId from the first email's user
       const firstEmail = emails[0];
@@ -307,7 +307,7 @@ class EmailEnrichmentService {
         // Check if already enriched - use database check instead of in-memory
         const existingEmail = await Email.findById(email._id);
         if (existingEmail?.aiMeta?.enrichedAt && !existingEmail?.aiMeta?.error && existingEmail?.isProcessed) {
-          console.log(`✅ Email ${email.id} already enriched`);
+          debug(`✅ Email ${email.id} already enriched`);
           // Emit already enriched status to specific user
           if (userSocket) {
             userSocket.emit('mail:enrichmentStatus', {
@@ -326,11 +326,11 @@ class EmailEnrichmentService {
       }
       
       if (unenrichedEmails.length === 0) {
-        console.log('📧 No emails need enrichment');
+        debug('📧 No emails need enrichment');
         return true;
       }
 
-      console.log(`📧 Found ${unenrichedEmails.length} emails needing enrichment`);
+      debug(`📧 Found ${unenrichedEmails.length} emails needing enrichment`);
 
       // Process emails in batches to prevent rate limiting
       const batchSize = 5; // Back to 5 emails per batch as requested
@@ -339,7 +339,7 @@ class EmailEnrichmentService {
 
       for (let i = 0; i < unenrichedEmails.length; i += batchSize) {
         const batch = unenrichedEmails.slice(i, i + batchSize);
-        console.log(`🔄 Processing batch of ${batch.length} emails`);
+        debug(`🔄 Processing batch of ${batch.length} emails`);
 
         let retryCount = 0;
         let success = false;
@@ -378,7 +378,7 @@ class EmailEnrichmentService {
 
                 // Emit success status to specific user
                 if (userSocket) {
-                  console.log(`📤 Emitting enrichment status for message ${email.id} to socket ${userSocket.id}`);
+                  debug(`📤 Emitting enrichment status for message ${email.id} to socket ${userSocket.id}`);
                   userSocket.emit('mail:enrichmentStatus', {
                     messageId: email.id,
                     status: 'completed',
@@ -386,15 +386,15 @@ class EmailEnrichmentService {
                     aiMeta: analysis,
                     email: updatedEmail
                   });
-                  console.log(`✅ Batch enrichment status emitted successfully for message ${email.id}`);
+                  debug(`✅ Batch enrichment status emitted successfully for message ${email.id}`);
                 } else {
-                  console.log(`❌ No user socket found for message ${email.id}`);
+                  debug(`❌ No user socket found for message ${email.id}`);
                 }
               }
             }));
 
             success = true;
-            console.log(`✅ Successfully processed batch of ${batch.length} emails`);
+            debug(`✅ Successfully processed batch of ${batch.length} emails`);
 
           } catch (error) {
             retryCount++;
@@ -414,7 +414,7 @@ class EmailEnrichmentService {
 
             if (retryCount < maxRetries) {
               const delay = baseDelay * Math.pow(2, retryCount - 1); // Exponential backoff
-              console.log(`⏳ Waiting ${delay/1000} seconds before retry ${retryCount}/${maxRetries}...`);
+              debug(`⏳ Waiting ${delay/1000} seconds before retry ${retryCount}/${maxRetries}...`);
               await new Promise(resolve => setTimeout(resolve, delay));
             } else {
               // Update emails with error status after all retries failed
@@ -435,7 +435,7 @@ class EmailEnrichmentService {
         // Add delay between batches to prevent rate limiting
         if (i + batchSize < unenrichedEmails.length) {
           const delay = 30000; // 30 seconds delay between batches to prevent API overload
-          console.log(`⏳ Waiting ${delay/1000} seconds before next batch...`);
+          debug(`⏳ Waiting ${delay/1000} seconds before next batch...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
@@ -455,15 +455,6 @@ class EmailEnrichmentService {
       // Extract relevant information from the message
       const { subject, content, from, to } = message;
       
-      console.log('🔍 generateAnalysis - Message:', {
-        userId: message.userId,
-        email: message.email,
-        from: message.from,
-        to: message.to,
-        messageKeys: Object.keys(message),
-        messageEmailType: typeof message.email,
-        messageEmailValue: message.email
-      });
       
       // Get user and email account for categories
       const user = await User.findById(message.userId);
@@ -471,12 +462,6 @@ class EmailEnrichmentService {
         throw new Error('User not found');
       }
 
-      console.log('🔍 generateAnalysis - User lookup:', {
-        messageUserId: message.userId,
-        foundUser: user._id,
-        worxstreamUserId: user.worxstreamUserId,
-        userEmail: user.email
-      });
 
       // Get email account for this specific email (use the user's email address)
       const emailAccount = await EmailAccount.findOne({ 
@@ -486,26 +471,7 @@ class EmailEnrichmentService {
 
       // Debug: Check all email accounts for this user
       const allUserAccounts = await EmailAccount.find({ userId: user._id });
-      console.log('🔍 generateAnalysis - All user email accounts:', {
-        totalAccounts: allUserAccounts.length,
-        accounts: allUserAccounts.map(acc => ({
-          email: acc.email,
-          hasCategories: !!acc.categories,
-          categoriesCount: acc.categories?.length || 0
-        }))
-      });
 
-      console.log('🔍 generateAnalysis - Email account lookup:', {
-        userId: user._id,
-        email: message.email,
-        found: !!emailAccount,
-        categoriesCount: emailAccount?.categories?.length || 0,
-        categories: emailAccount?.categories?.map(cat => ({
-          name: cat.name,
-          label: cat.label,
-          description: cat.description
-        })) || []
-      });
 
       if (!emailAccount) {
         throw new Error('Email account not found');
@@ -513,7 +479,7 @@ class EmailEnrichmentService {
 
       // 🚨 CRITICAL FIX: Don't process if no categories defined
       if (!emailAccount.categories || emailAccount.categories.length === 0) {
-        console.log('⏭️ Skipping enrichment - no categories defined yet for account:', message.email);
+        debug('⏭️ Skipping enrichment - no categories defined yet for account:', message.email);
         throw new Error('No categories defined yet. Please create categories first before processing emails.');
       }
 
@@ -562,18 +528,6 @@ Format the response as a JSON object with these fields:
 }`;
 
       // Log the exact prompt being sent to AI for debugging
-      console.log('🤖 AI Prompt being sent:', {
-        emailId: message.id,
-        from: message.from,
-        subject: message.subject,
-        categories: emailAccount.categories.map(cat => ({
-          name: cat.name,
-          label: cat.label,
-          description: cat.description
-        })),
-        promptLength: prompt.length
-      });
-      console.log('📝 Full AI Prompt:', prompt);
 
       // Implement retry logic with exponential backoff
       const maxRetries = 3;
@@ -585,13 +539,6 @@ Format the response as a JSON object with these fields:
           const analysis = await this.makeCustomAnalysisCall(message, prompt);
           
           // Log the AI response for debugging
-          console.log('🤖 AI Response received:', {
-            emailId: message.id,
-            from: message.from,
-            aiResponse: analysis,
-            category: analysis.category,
-            summary: analysis.summary?.substring(0, 100) + '...'
-          });
           
           return analysis;
         } catch (error) {
@@ -602,7 +549,7 @@ Format the response as a JSON object with these fields:
           
           // Otherwise, wait and retry
           const delay = baseDelay * Math.pow(2, attempt);
-          console.log(`⏳ Error occurred, waiting ${delay/1000} seconds before retry ${attempt + 1}/${maxRetries}`);
+          debug(`⏳ Error occurred, waiting ${delay/1000} seconds before retry ${attempt + 1}/${maxRetries}`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
@@ -614,7 +561,7 @@ Format the response as a JSON object with these fields:
 
   async makeCustomAnalysisCall(message, prompt) {
     try {
-      console.log('🔍 makeCustomAnalysisCall - Using custom prompt for user categories');
+      debug('🔍 makeCustomAnalysisCall - Using custom prompt for user categories');
       
       const response = await makeClaudeApiCall(prompt);
       
@@ -671,7 +618,7 @@ Format the response as a JSON object with these fields:
             cleanedResponse = cleanedResponse.substring(firstBrace, lastBrace + 1);
           }
           
-          console.log('🔧 Attempting to parse cleaned response:', cleanedResponse);
+          debug('🔧 Attempting to parse cleaned response:', cleanedResponse);
           const analysis = JSON.parse(cleanedResponse);
           
           // Validate category again after cleaning
@@ -729,7 +676,7 @@ Format the response as a JSON object with these fields:
 
   async generateBatchAnalysis(messages) {
     try {
-      console.log('🔍 generateBatchAnalysis - Processing batch of', messages.length, 'emails');
+      debug('🔍 generateBatchAnalysis - Processing batch of', messages.length, 'emails');
       
       // For batch analysis, we'll need to implement custom logic for each user's categories
       // For now, fall back to the generic service

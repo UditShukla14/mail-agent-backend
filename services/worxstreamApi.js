@@ -1,5 +1,6 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
+import { debug } from '../utils/logger.js';
 
 dotenv.config();
 
@@ -41,7 +42,7 @@ class WorxstreamApiService {
   async request(endpoint, options = {}) {
     const url = `${this.baseURL}${endpoint}`;
     
-    console.log(`🌐 Making request to worXstream API: ${url}`);
+    debug(`🌐 Making request to worXstream API: ${url}`);
     
     const config = {
       ...options,
@@ -60,7 +61,7 @@ class WorxstreamApiService {
       const response = await axios(url, config);
       clearTimeout(timeoutId);
 
-      console.log(`✅ worXstream API response: ${response.status}`);
+      debug(`✅ worXstream API response: ${response.status}`);
 
       if (!response.data.success && response.data.error) {
         throw {
@@ -99,7 +100,7 @@ class WorxstreamApiService {
   // Verify user token with worXstream backend
   async verifyUserToken(token) {
     try {
-      console.log(`🔐 Verifying token with worXstream API...`);
+      debug(`🔐 Verifying token with worXstream API...`);
       
       // Accept: application/json makes Laravel answer an unknown/old token with 401 JSON instead of redirecting
       // to a login page; redirects are not followed so a redirect is read as "token not accepted".
@@ -112,7 +113,7 @@ class WorxstreamApiService {
         },
       });
       
-      console.log('✅ Token verification successful');
+      debug('✅ Token verification successful');
       
       // The response should already contain the user data structure
       // Check if it has the expected format

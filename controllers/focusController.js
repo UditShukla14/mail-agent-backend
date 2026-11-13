@@ -2,6 +2,7 @@
 import EmailAccount from '../models/EmailAccount.js';
 import Email from '../models/email.js';
 import User from '../models/User.js';
+import { debug } from '../utils/logger.js';
 
 // Generate a unique folder name for focus items
 const generateFocusFolderName = (type, value) => {
@@ -18,7 +19,7 @@ const generateFocusFolderName = (type, value) => {
 // Add a new focus item (subject or email)
 export const addFocusItem = async (req, res) => {
   try {
-    console.log('🔍 addFocusItem called with:', {
+    debug('🔍 addFocusItem called with:', {
       body: req.body,
       user: req.user,
       extractedValue: req.body.value,
@@ -67,7 +68,7 @@ export const addFocusItem = async (req, res) => {
     });
 
     if (!emailAccount) {
-      console.log('🆕 Creating new email account for:', queryEmail);
+      debug('🆕 Creating new email account for:', queryEmail);
       emailAccount = new EmailAccount({
         userId: user._id,
         email: queryEmail,
@@ -104,7 +105,7 @@ export const addFocusItem = async (req, res) => {
     emailAccount.focusedItems.push(newFocusItem);
     await emailAccount.save();
 
-    console.log('✅ Focus item added:', newFocusItem);
+    debug('✅ Focus item added:', newFocusItem);
 
     // Update existing emails to assign them to this focus folder
     let query = { userId: user._id, email: queryEmail };
@@ -131,7 +132,7 @@ export const addFocusItem = async (req, res) => {
     newFocusItem.emailCount = updatedEmails.modifiedCount;
     await emailAccount.save();
 
-    console.log(`📧 Updated ${updatedEmails.modifiedCount} emails for focus folder: ${folderName}`);
+    debug(`📧 Updated ${updatedEmails.modifiedCount} emails for focus folder: ${folderName}`);
 
     res.json({
       success: true,
@@ -150,7 +151,7 @@ export const addFocusItem = async (req, res) => {
 // Remove a focus item
 export const removeFocusItem = async (req, res) => {
   try {
-    console.log('🗑️ removeFocusItem called with:', {
+    debug('🗑️ removeFocusItem called with:', {
       params: req.params,
       body: req.body,
       user: req.user,
@@ -221,7 +222,7 @@ export const removeFocusItem = async (req, res) => {
       { $unset: { focusFolder: 1 } }
     );
 
-    console.log(`📧 Removed focus folder from ${updatedEmails.modifiedCount} emails`);
+    debug(`📧 Removed focus folder from ${updatedEmails.modifiedCount} emails`);
 
     res.json({
       success: true,
@@ -240,7 +241,7 @@ export const removeFocusItem = async (req, res) => {
 // Get all focus items for an email account
 export const getFocusItems = async (req, res) => {
   try {
-    console.log('🔍 getFocusItems called with:', {
+    debug('🔍 getFocusItems called with:', {
       query: req.query,
       user: req.user
     });
@@ -283,7 +284,7 @@ export const getFocusItems = async (req, res) => {
     });
 
     if (!emailAccount) {
-      console.log('🆕 Creating new email account for:', targetEmail);
+      debug('🆕 Creating new email account for:', targetEmail);
       emailAccount = new EmailAccount({
         userId: user._id,
         email: targetEmail,
@@ -308,7 +309,7 @@ export const getFocusItems = async (req, res) => {
       })
     );
 
-    console.log('📋 Returning focus items:', focusItemsWithCounts.length, 'items');
+    debug('📋 Returning focus items:', focusItemsWithCounts.length, 'items');
     res.json({
       success: true,
       data: focusItemsWithCounts
@@ -325,7 +326,7 @@ export const getFocusItems = async (req, res) => {
 // Get emails for a specific focus folder
 export const getFocusFolderEmails = async (req, res) => {
   try {
-    console.log('📧 getFocusFolderEmails called with:', {
+    debug('📧 getFocusFolderEmails called with:', {
       params: req.params,
       query: req.query,
       user: req.user
@@ -382,7 +383,7 @@ export const getFocusFolderEmails = async (req, res) => {
       filterCriteria['aiMeta.sentiment'] = sentiment;
     }
 
-    console.log('🔍 Filter criteria:', filterCriteria);
+    debug('🔍 Filter criteria:', filterCriteria);
 
     // Get emails for the focus folder with filters
     const emails = await Email.find(filterCriteria)
@@ -394,7 +395,7 @@ export const getFocusFolderEmails = async (req, res) => {
     // Get total count with same filters
     const totalEmails = await Email.countDocuments(filterCriteria);
 
-    console.log(`📧 Found ${emails.length} emails in focus folder: ${folderName}`);
+    debug(`📧 Found ${emails.length} emails in focus folder: ${folderName}`);
 
     res.json({
       success: true,

@@ -1,6 +1,7 @@
 import { retryTransient, isOutlookUnavailableError } from '../utils/transientRetry.js';
 import axios from 'axios';
 import { simpleParser } from 'mailparser';
+import { debug } from '../utils/logger.js';
 
 function looksLikeHtml(body) {
   return /<\/?[a-z][\s\S]*>/i.test(String(body || ''));
@@ -64,7 +65,7 @@ async function sendEmail(accessToken, { to, subject = '', body, cc, bcc, content
 // 📧 Reply to email
 async function replyToEmail(accessToken, { messageId, comment, toRecipients, ccRecipients, bccRecipients }) {
   try {
-    console.log(`📧 Replying to message ${messageId}`);
+    debug(`📧 Replying to message ${messageId}`);
     
     const replyData = {
       comment: comment || '',
@@ -84,7 +85,7 @@ async function replyToEmail(accessToken, { messageId, comment, toRecipients, ccR
       }
     );
 
-    console.log(`✅ Reply sent successfully for message ${messageId}`);
+    debug(`✅ Reply sent successfully for message ${messageId}`);
     return { success: true };
   } catch (err) {
     console.error('❌ Failed to reply to email:', err?.response?.data || err.message);
@@ -95,7 +96,7 @@ async function replyToEmail(accessToken, { messageId, comment, toRecipients, ccR
 // 📧 Reply all to email
 async function replyAllToEmail(accessToken, { messageId, comment, toRecipients, ccRecipients, bccRecipients }) {
   try {
-    console.log(`📧 Reply all to message ${messageId}`);
+    debug(`📧 Reply all to message ${messageId}`);
     
     const replyAllData = {
       comment: comment || '',
@@ -115,7 +116,7 @@ async function replyAllToEmail(accessToken, { messageId, comment, toRecipients, 
       }
     );
 
-    console.log(`✅ Reply all sent successfully for message ${messageId}`);
+    debug(`✅ Reply all sent successfully for message ${messageId}`);
     return { success: true };
   } catch (err) {
     console.error('❌ Failed to reply all to email:', err?.response?.data || err.message);
@@ -139,7 +140,7 @@ async function getMailFolders(accessToken) {
       unreadItemCount: folder.unreadItemCount
     }));
 
-    console.log(`📂 Retrieved ${folders.length} folders`);
+    debug(`📂 Retrieved ${folders.length} folders`);
     return folders;
   } catch (err) {
     console.error('❌ Failed to fetch folders:', err?.response?.status, JSON.stringify(err?.response?.data || err.message));
@@ -153,7 +154,7 @@ async function getMailFolders(accessToken) {
 // get mail by id 
 async function getMessageById(accessToken, messageId) {
   try {
-    console.log(`🔍 Fetching message ${messageId}`);
+    debug(`🔍 Fetching message ${messageId}`);
     
     // First get the message metadata including importance
     const metadataRes = await axios.get(
@@ -179,7 +180,7 @@ async function getMessageById(accessToken, messageId) {
 
     // Parse MIME
     const parsed = await simpleParser(mimeRes.data);
-    console.log(`📎 Raw attachments from MIME:`, parsed.attachments);
+    debug(`📎 Raw attachments from MIME:`, parsed.attachments);
 
     // Inline + regular attachments
     const attachments = parsed.attachments.map(att => ({
@@ -192,7 +193,7 @@ async function getMessageById(accessToken, messageId) {
       contentBytes: att.content.toString('base64'),
     }));
 
-    console.log(`📎 Processed attachments:`, attachments);
+    debug(`📎 Processed attachments:`, attachments);
 
     return {
       id: messageId,
@@ -323,12 +324,12 @@ async function getAttachmentsByMessageId(accessToken, messageId) {
       }
     );
 
-    console.log(`📎 Raw attachments for message ${messageId}:`, res.data.value);
+    debug(`📎 Raw attachments for message ${messageId}:`, res.data.value);
 
     const filtered = res.data.value
       .filter(att => att['@odata.type'] === '#microsoft.graph.fileAttachment' && att.isInline);
 
-    console.log(`📎 Inline file attachments (filtered):`, filtered);
+    debug(`📎 Inline file attachments (filtered):`, filtered);
 
     const mapped = filtered.map(att => ({
       id: att.id,
