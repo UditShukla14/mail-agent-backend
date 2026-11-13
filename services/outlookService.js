@@ -217,7 +217,8 @@ async function getMessageById(accessToken, messageId) {
 
 
 // get messages by folder
-async function getMessagesByFolder(accessToken, folderId, nextLink = null, top = 20) {
+/** `opts.throwOnError`: surface Graph failures to the caller (sync needs to tell "nothing new" from "failed"); default keeps the old empty-list fallback. */
+async function getMessagesByFolder(accessToken, folderId, nextLink = null, top = 20, opts = {}) {
   try {
     const url = nextLink
       ? nextLink
@@ -263,6 +264,7 @@ async function getMessagesByFolder(accessToken, folderId, nextLink = null, top =
     if (err.response?.data) {
       console.error('❌ Full error response:', err.response.data);
     }
+    if (opts.throwOnError) throw err;
     return { messages: [], nextLink: null };
   }
 }

@@ -225,7 +225,7 @@ export const initMailSocket = (socket, io) => {
       let fetched = 0;
       for (let page = 1; page <= SYNC_PAGES; page++) {
         const { messages: pageMessages, nextLink } = await withTokenRefresh(
-          (accessToken) => getMessagesByFolder(accessToken, folderId, next),
+          (accessToken) => getMessagesByFolder(accessToken, folderId, next, 20, { throwOnError: true }),
           {
             accessToken: token,
             refresh: () => refreshSpecificToken(worxstreamUserId, email, 'outlook'),
