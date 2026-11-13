@@ -238,6 +238,21 @@ async function getMessageById(accessToken, messageId, opts = {}) {
   }
 }
 
+/** What a message has attached: name, type and size only (no file bytes). */
+export async function listAttachmentMeta(accessToken, messageId) {
+  const res = await retryTransient(() => axios.get(
+    `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments`,
+    { headers: { Authorization: `Bearer ${accessToken}` }, params: { $select: 'id,name,contentType,size,isInline' } },
+  ));
+  return (res.data.value || []).map((a) => ({
+    id: a.id,
+    name: a.name,
+    contentType: a.contentType,
+    size: a.size,
+    inline: Boolean(a.isInline),
+  }));
+}
+
 /** The bytes of one attachment, fetched when the user downloads it. */
 export async function getAttachmentContent(accessToken, messageId, attachmentId) {
   const res = await retryTransient(() => axios.get(
