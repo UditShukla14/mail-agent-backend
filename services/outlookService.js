@@ -152,7 +152,9 @@ async function getMailFolders(accessToken) {
 
 // get mail by id
 const MESSAGE_SELECT = 'id,subject,from,toRecipients,ccRecipients,bccRecipients,body,receivedDateTime,isRead,importance,flag,conversationId,hasAttachments,parentFolderId';
-const ATTACHMENT_SELECT = 'id,name,contentType,size,isInline,contentId';
+// contentId only exists on file attachments, so it cannot be selected from the mixed list (that is a 400); it comes
+// with the single-attachment fetch below.
+const ATTACHMENT_SELECT = 'id,name,contentType,size,isInline';
 /** Inline images are embedded in the body, so their bytes come with the message; anything bigger is left out. */
 const INLINE_BYTES_LIMIT = 2 * 1024 * 1024;
 
@@ -200,6 +202,7 @@ async function getMessageById(accessToken, messageId, opts = {}) {
         try {
           const r = await retryTransient(() => axios.get(`${base}/attachments/${encodeURIComponent(a.id)}`, { headers }));
           out.contentBytes = r.data.contentBytes || '';
+          out.contentId = r.data.contentId || out.contentId;
         } catch (err) {
           console.error('⚠️ Could not fetch inline image:', err?.response?.status || err.message);
         }

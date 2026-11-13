@@ -244,13 +244,15 @@ httpServer.listen(PORT, () => {
   // A sync-all left running by a previous process is not running any more
   markInterruptedSyncJobs().catch((err) => console.error('⚠️ Could not reset sync jobs:', err.message));
 
-  // Start the token refresh service
-  tokenRefreshService.start();
-  console.log('🔄 Token refresh service started');
-
-  // Outlook Graph subscription renewal + one-time backfill for existing accounts
-  outlookSubscriptionRenewalService.start();
-  outlookSubscriptionRenewalService.backfill().catch((err) => {
-    console.error('❌ Outlook subscription startup backfill failed:', err.message);
-  });
+  // Work that touches EVERY connected account (a refresh timer over all stored tokens, a subscription backfill and renewal
+  // over all accounts) only runs when asked for. By default each account is looked after when its own owner uses mail:
+  // tokens refresh when a request needs them, and ensureSubscriptionForAccount runs on mail:init / mail:getFolders.
+  if (process.env.BACKGROUND_FOR_ALL_ACCOUNTS === 'true') {
+    tokenRefreshService.start();
+    console.log('🔄 Token refresh service started (all accounts)');
+    outlookSubscriptionRenewalService.start();
+    outlookSubscriptionRenewalService.backfill().catch((err) => {
+      console.error('❌ Outlook subscription startup backfill failed:', err.message);
+    });
+  }
 });

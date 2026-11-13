@@ -29,6 +29,7 @@ import axios from 'axios';
 import emailService from '../services/emailService.js';
 import { saveOutlookMessages, getFolderThreads, syncConversationIds } from '../services/folderSync.js';
 import { startAccountSync, getSyncStatus } from '../services/syncJobs.js';
+import { ensureSubscriptionForAccount } from '../services/outlookSubscriptionService.js';
 import { debug } from '../utils/logger.js';
 
 export const initMailSocket = (socket, io) => {
@@ -92,6 +93,8 @@ export const initMailSocket = (socket, io) => {
 
   // Mail-specific initialization (for when user navigates to mail page)
   onAuthed('mail:init', async ({ worxstreamUserId, email }) => {
+    // Only this account: keep its push-mail subscription alive while its owner is using mail.
+    ensureSubscriptionForAccount(worxstreamUserId, email).catch(() => {});
     try {
       
       // Several sockets per user are fine (more than one tab or page); they are not disconnected here.
@@ -181,6 +184,8 @@ export const initMailSocket = (socket, io) => {
 
   // 📁 Get folders only (for when already initialized)
   onAuthed('mail:getFolders', async ({ worxstreamUserId, email }) => {
+    // Only this account: keep its push-mail subscription alive while its owner is using mail.
+    ensureSubscriptionForAccount(worxstreamUserId, email).catch(() => {});
     try {
       // Store worxstreamUserId on socket for later use
       socket.worxstreamUserId = worxstreamUserId;

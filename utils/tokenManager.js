@@ -208,6 +208,11 @@ export const refreshToken = async (refresh_token, provider) => {
       timestamp: Date.now()
     };
   } catch (err) {
+    if (err?.response?.data?.error === 'invalid_grant') {
+      // Expired from inactivity (90 days) or revoked: only the account's owner can fix it, by reconnecting.
+      console.warn(`🔴 Token refresh rejected (${provider}): invalid_grant, the account must be reconnected`);
+      return null;
+    }
     console.error(`🔴 Token refresh failed (${provider}):`, err?.response?.data || err.message);
     console.error(`🔴 Full error details:`, {
       status: err.response?.status,

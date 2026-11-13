@@ -313,3 +313,41 @@ export function verifyClientState(clientState) {
     return false;
   }
 }
+
+const ensuredAt = new Map(); // `${userId}:${email}` -> time of the last check
+const ENSURE_EVERY_MS = 10 * 60 * 1000;
+const RENEW_WHEN_LEFT_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Make sure ONE account has a live Graph subscription: create it if missing, renew it when it is close to expiring.
+ * Called when that account's owner opens mail, so only the account being used is looked at. Checked at most every
+ * 10 minutes per account. Accounts that need reconnecting are skipped.
+ */
+export async function ensureSubscriptionForAccount(worxstreamUserId, email) {
+  if (!process.env.OUTLOOK_WEBHOOK_CLIENT_STATE || !email) return;
+  const userId = Number(worxstreamUserId);
+  const mail = String(email).toLowerCase();
+  const key = `${userId}:${mail}`;
+  if (Date.now() - (ensuredAt.get(key) || 0) < ENSURE_EVERY_MS) return;
+  ensuredAt.set(key, Date.now());
+  try {
+    const user = await User.findOne({ worxstreamUserId: userId });
+    if (!user) return;
+    const account = await EmailAccount.findOne({ userId: user._id, email: mail });
+    if (account?.isExpired) return; // the owner has to reconnect first
+    const expires = account?.graphSubscriptionExpiresAt?.getTime() || 0;
+    if (account?.graphSubscriptionId && expires > Date.now() + RENEW_WHEN_LEFT_MS) return; // healthy
+    if (account?.graphSubscriptionId && expires > Date.now()) {
+      try {
+        await renewSubscription(userId, mail, account.graphSubscriptionId);
+        return;
+      } catch {
+        // fall through and create a fresh one
+      }
+    }
+    await createMailSubscription(userId, mail);
+  } catch (err) {
+    ensuredAt.delete(key); // try again next time
+    console.warn(`⚠️ Could not ensure the mail subscription for ${mail}:`, err?.response?.data?.error?.message || err.message);
+  }
+}
