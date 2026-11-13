@@ -2,6 +2,9 @@
 import {
   getMailFolders,
   getMessagesByFolder,
+  getConversationMessages,
+  getAttachmentContent,
+  getFolderThreadIds,
   getMessageById,
   sendEmail,
   replyToEmail,
@@ -24,6 +27,7 @@ import emailEnrichmentService from '../services/emailEnrichment.js';
 import enrichmentQueueService from '../services/enrichmentQueueService.js';
 import axios from 'axios';
 import emailService from '../services/emailService.js';
+import { saveOutlookMessages, getFolderThreads, syncConversationIds } from '../services/folderSync.js';
 import { debug } from '../utils/logger.js';
 
 export const initMailSocket = (socket, io) => {
@@ -206,7 +210,8 @@ export const initMailSocket = (socket, io) => {
     }
   });
 
-  // 🔄 Sync one folder from Outlook: pull its newest messages (a few pages) into the database, then tell the client.
+  // 🔄 Sync one folder with Outlook: pull its newest messages, then make the saved conversation ids (and the saved
+  // list of messages) equal to what Outlook has, and tell the client what changed.
   const SYNC_PAGES = 3;
   const syncingFolders = new Set();
   onAuthed('mail:syncFolder', async ({ worxstreamUserId, email, folderId }) => {
@@ -225,7 +230,7 @@ export const initMailSocket = (socket, io) => {
       let next = null;
       let fetched = 0;
       for (let page = 1; page <= SYNC_PAGES; page++) {
-        const { messages: pageMessages, nextLink } = await withTokenRefresh(
+        const { messages: batch, nextLink } = await withTokenRefresh(
           (accessToken) => getMessagesByFolder(accessToken, folderId, next, 20, { throwOnError: true }),
           {
             accessToken: token,
@@ -234,30 +239,26 @@ export const initMailSocket = (socket, io) => {
           },
         );
         if (page === 1 && nextLink) folderPaginationMap.set(key, nextLink); // "load more" continues after page 1
-        await Promise.all(pageMessages.map(async (msg) => {
-          try {
-            await Email.findOneAndUpdate(
-              { id: msg.id, email },
-              {
-                $set: {
-                  id: msg.id, userId: user._id, email, from: msg.from || '', to: msg.to || '', cc: msg.cc || '', bcc: msg.bcc || '',
-                  subject: msg.subject || '(No Subject)', content: msg.content || '', preview: msg.preview || '',
-                  timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date(),
-                  read: msg.read || false, folder: folderId, important: msg.important || false, flagged: msg.flagged || false,
-                  updatedAt: new Date(),
-                },
-              },
-              { upsert: true, setDefaultsOnInsert: true },
-            );
-          } catch (error) {
-            console.error(`❌ Failed to save message ${msg.id}:`, error);
-          }
-        }));
-        fetched += pageMessages.length;
+        await saveOutlookMessages(user, email, folderId, batch);
+        fetched += batch.length;
         if (!nextLink) break;
         next = nextLink;
       }
-      socket.emit('mail:folderSynced', { folderId, fetched });
+
+      // Conversation ids and the folder's contents follow Outlook. A failure here does not undo the pull above.
+      let threads = { updated: 0, removed: 0, missing: 0 };
+      try {
+        threads = await syncConversationIds({ token: (await getToken(worxstreamUserId, email, 'outlook')) || token, user, email, folderId });
+      } catch (error) {
+        console.error('⚠️ Conversation id sync failed:', error?.response?.status || error.message);
+      }
+      socket.emit('mail:folderSynced', {
+        folderId,
+        fetched,
+        threadsUpdated: threads.updated,
+        removed: threads.removed,
+        missingThreadIds: threads.missing,
+      });
     } catch (error) {
       console.error('❌ Error in mail:syncFolder:', error);
       socket.emit('mail:error', outlookFailureMessage(error, 'Failed to sync the folder'));
@@ -267,173 +268,49 @@ export const initMailSocket = (socket, io) => {
     }
   });
 
-  // 📁 Load paginated folder messages
-      onAuthed('mail:getFolder', async ({ worxstreamUserId, email, folderId, page = 1, filters = {} }) => {
-    
+  // 📁 A page of a folder as conversations: one row per conversation (Outlook's conversationId), newest first.
+  const FOLDER_PAGE_SIZE = 20;
+  onAuthed('mail:getFolder', async ({ worxstreamUserId, email, folderId, page = 1, filters = {} }) => {
     const debounceKey = `getFolder:${worxstreamUserId}:${email}:${folderId}:${page}:${JSON.stringify(filters)}`;
-    
+
     debounce(debounceKey, async () => {
       try {
-        // Use the authenticated user's ID instead of the passed worxstreamUserId
-        // Ensure we use the correct type (Number) for worxstreamUserId
         const userId = worxstreamUserId;
-        
-        
-        // For page 1, try to get messages from database with filters first
+        const [token, user] = await Promise.all([getToken(userId, email, 'outlook'), User.findOne({ worxstreamUserId: userId })]);
+        const key = `${socket.id}-${folderId}`;
         let messages = [];
         let hasMore = false;
-        
-        if (page === 1) {
-          // First page: always fetch from Outlook to get fresh data and check for more messages
-          
-          const token = await getToken(userId, email, 'outlook');
-          if (token) {
-            const key = `${socket.id}-${folderId}`;
-            // First page: start from the newest page again. A nextLink kept from an earlier load would return page 2.
-            folderPaginationMap.delete(key);
 
-            const { messages: outlookMessages, nextLink: newNextLink } = await getMessagesByFolder(token, folderId, null);
-            if (newNextLink) folderPaginationMap.set(key, newNextLink);
-            
-            // Get user from database
-            const user = await User.findOne({ worxstreamUserId: userId });
-            if (user) {
-              // Save new messages to database
-              const savedMessages = await Promise.all(outlookMessages.map(async msg => {
-                try {
-                  const emailData = {
-                    id: msg.id,
-                    userId: user._id,
-                    email: email,
-                    from: msg.from || '',
-                    to: msg.to || '',
-                    cc: msg.cc || '',
-                    bcc: msg.bcc || '',
-                    subject: msg.subject || '(No Subject)',
-                    content: msg.content || '',
-                    preview: msg.preview || '',
-                    timestamp: (() => {
-                      if (msg.timestamp && msg.timestamp !== '') {
-                        const receivedTime = new Date(msg.timestamp);
-                        return receivedTime;
-                      } else {
-                        return new Date();
-                      }
-                    })(),
-                    read: msg.read || false,
-                    folder: folderId,
-                    important: msg.important || false,
-                    flagged: msg.flagged || false,
-                    isProcessed: false,
-                    updatedAt: new Date()
-                  };
+        if (token && user) {
+          // Page 1 starts from the newest page of Outlook again; a link kept from an earlier load would return page 2.
+          if (page === 1) folderPaginationMap.delete(key);
 
-                  const savedMsg = await Email.findOneAndUpdate(
-                    { id: msg.id, email: email },
-                    { $set: emailData },
-                    { upsert: true, new: true, setDefaultsOnInsert: true }
-                  );
-                  return savedMsg;
-                } catch (error) {
-                  console.error(`❌ Failed to save message ${msg.id}:`, error);
-                  return null;
-                }
-              }));
+          // One more page from Outlook into Mongo.
+          const pull = async () => {
+            const { messages: batch, nextLink } = await getMessagesByFolder(token, folderId, folderPaginationMap.get(key) || null);
+            if (nextLink) folderPaginationMap.set(key, nextLink);
+            else folderPaginationMap.delete(key);
+            await saveOutlookMessages(user, email, folderId, batch);
+          };
 
-              // Get filtered messages from database (including newly saved ones)
-              messages = await emailService.getFolderMessages(userId, email, folderId, page, 20, filters);
-              
-              // Check if there are more messages by getting one extra message
-              const nextPageMessages = await emailService.getFolderMessages(userId, email, folderId, page + 1, 1, filters);
-              hasMore = nextPageMessages.length > 0;
-            }
-            
-            // Also check if there are more messages in Outlook
-            hasMore = hasMore || !!newNextLink;
+          // Page 1 always refreshes from Outlook (new mail). Later pages only go to Outlook when Mongo does not hold
+          // enough conversations yet; pages are counted in conversations, so one Outlook page may add fewer than a page.
+          if (page === 1) await pull();
+          let result = await getFolderThreads({ user, email, folderId, page, pageSize: FOLDER_PAGE_SIZE, filters });
+          for (let i = 0; i < 5 && result.messages.length < FOLDER_PAGE_SIZE && folderPaginationMap.has(key); i++) {
+            await pull();
+            result = await getFolderThreads({ user, email, folderId, page, pageSize: FOLDER_PAGE_SIZE, filters });
           }
-        } else {
-          // Load more: fetch from Outlook API without filters
-          
-          const token = await getToken(userId, email, 'outlook');
-          if (token) {
-            const key = `${socket.id}-${folderId}`;
-            const nextLink = folderPaginationMap.get(key);
-            
-            const { messages: outlookMessages, nextLink: newNextLink } = await getMessagesByFolder(token, folderId, nextLink);
-            if (newNextLink) folderPaginationMap.set(key, newNextLink);
-            
-            // Get user from database
-            const user = await User.findOne({ worxstreamUserId: userId });
-            if (user) {
-              // Save new messages to database
-              const savedMessages = await Promise.all(outlookMessages.map(async msg => {
-                try {
-                  const emailData = {
-                    id: msg.id,
-                    userId: user._id,
-                    email: email,
-                    from: msg.from || '',
-                    to: msg.to || '',
-                    cc: msg.cc || '',
-                    bcc: msg.bcc || '',
-                    subject: msg.subject || '(No Subject)',
-                    content: msg.content || '',
-                    preview: msg.preview || '',
-                    timestamp: (() => {
-                      if (msg.timestamp && msg.timestamp !== '') {
-                        const receivedTime = new Date(msg.timestamp);
-                        return receivedTime;
-                      } else {
-                        return new Date();
-                      }
-                    })(),
-                    read: msg.read || false,
-                    folder: folderId,
-                    important: msg.important || false,
-                    flagged: msg.flagged || false,
-                    isProcessed: false,
-                    updatedAt: new Date()
-                  };
-
-                  const savedMsg = await Email.findOneAndUpdate(
-                    { id: msg.id, email: email },
-                    { $set: emailData },
-                    { upsert: true, new: true, setDefaultsOnInsert: true }
-                  );
-                  return savedMsg;
-                } catch (error) {
-                  console.error(`❌ Failed to save message ${msg.id}:`, error);
-                  return null;
-                }
-              }));
-
-              // Get messages from database with proper pagination
-              messages = await emailService.getFolderMessages(userId, email, folderId, page, 20, filters);
-              
-              // Check if there are more messages by getting one extra message
-              const nextPageMessages = await emailService.getFolderMessages(userId, email, folderId, page + 1, 1, filters);
-              hasMore = nextPageMessages.length > 0;
-            }
-            
-            // Also check if there are more messages in Outlook
-            hasMore = hasMore || !!newNextLink;
-          }
+          messages = result.messages;
+          hasMore = result.hasMore || folderPaginationMap.has(key);
         }
-        
 
-        // Emit messages immediately with database IDs
-        const messagesWithDbId = messages.map(msg => ({
-          ...msg.toObject(),
-          dbId: msg._id.toString() // Include the MongoDB ObjectId as dbId
-        }));
-        
         socket.emit('mail:folderMessages', {
           folderId,
           page,
-          messages: messagesWithDbId,
-          nextLink: hasMore ? `page=${page + 1}` : null
+          messages: messages.map((msg) => ({ ...msg, dbId: String(msg._id) })),
+          nextLink: hasMore ? `page=${page + 1}` : null,
         });
-
       } catch (error) {
         console.error('❌ Error in mail:getFolder:', error);
         socket.emit('mail:error', 'Failed to process folder request');
@@ -457,6 +334,48 @@ export const initMailSocket = (socket, io) => {
     } catch (error) {
       console.error('Failed to get message:', error);
       socket.emit('mail:error', error.message);
+    }
+  });
+
+  // 🧵 The messages of a conversation (Outlook thread), newest first
+  onAuthed('mail:getConversation', async ({ worxstreamUserId, email, conversationId }) => {
+    if (!email || !conversationId) return socket.emit('mail:error', 'email and conversationId are required');
+    try {
+      const token = await getToken(worxstreamUserId, email, 'outlook');
+      if (!token) return socket.emit('mail:error', `Email account ${email} is not connected or has expired.`);
+      const messages = await withTokenRefresh(
+        (accessToken) => getConversationMessages(accessToken, conversationId),
+        {
+          accessToken: token,
+          refresh: () => refreshSpecificToken(worxstreamUserId, email, 'outlook'),
+          getFreshToken: () => getToken(worxstreamUserId, email, 'outlook'),
+        },
+      );
+      socket.emit('mail:conversation', { conversationId, messages });
+    } catch (error) {
+      console.error('❌ Error in mail:getConversation:', error?.response?.data || error.message);
+      socket.emit('mail:conversation', { conversationId, messages: [], failed: true });
+    }
+  });
+
+  // 📥 The bytes of one attachment, requested when the user downloads it
+  onAuthed('mail:getAttachment', async ({ worxstreamUserId, email, messageId, attachmentId }) => {
+    if (!email || !messageId || !attachmentId) return socket.emit('mail:error', 'email, messageId and attachmentId are required');
+    try {
+      const token = await getToken(worxstreamUserId, email, 'outlook');
+      if (!token) return socket.emit('mail:error', 'Token not found');
+      const attachment = await withTokenRefresh(
+        (accessToken) => getAttachmentContent(accessToken, messageId, attachmentId),
+        {
+          accessToken: token,
+          refresh: () => refreshSpecificToken(worxstreamUserId, email, 'outlook'),
+          getFreshToken: () => getToken(worxstreamUserId, email, 'outlook'),
+        },
+      );
+      socket.emit('mail:attachment', { messageId, attachmentId, ...attachment });
+    } catch (error) {
+      console.error('❌ Error in mail:getAttachment:', error?.response?.status || error.message);
+      socket.emit('mail:attachment', { messageId, attachmentId, failed: true });
     }
   });
 

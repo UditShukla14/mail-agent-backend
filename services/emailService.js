@@ -3,6 +3,29 @@ import { getMessagesByFolder, getMessageById } from './outlookService.js';
 import Email from '../models/email.js';
 import User from '../models/User.js';
 import focusAssignmentService from './focusAssignmentService.js';
+import mongoose from 'mongoose';
+import { embedInlineImages } from '../utils/inlineImages.js';
+
+// ---- recently opened messages (in memory, per process) ----
+const MESSAGE_CACHE_TTL_MS = 5 * 60 * 1000;
+const MESSAGE_CACHE_MAX = 50; // inline images are kept with the message, so keep this modest
+const messageCache = new Map();
+
+function readCache(key) {
+  const hit = messageCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > MESSAGE_CACHE_TTL_MS) {
+    messageCache.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function writeCache(key, value) {
+  messageCache.delete(key);
+  messageCache.set(key, { at: Date.now(), value });
+  if (messageCache.size > MESSAGE_CACHE_MAX) messageCache.delete(messageCache.keys().next().value);
+}
 
 class EmailService {
   async getFolderMessages(worxstreamUserId, email, folderId, page = 1, pageSize = 20, filters = {}) {
@@ -197,101 +220,60 @@ class EmailService {
 
   async getMessage(worxstreamUserId, email, messageId) {
     try {
-      // Validate input parameters
       if (!worxstreamUserId || !email || !messageId) {
         console.error('❌ Invalid parameters:', { worxstreamUserId, email, messageId });
         throw new Error('Missing required parameters');
       }
 
-
-      const token = await getToken(worxstreamUserId, email, 'outlook');
+      // Independent lookups run together instead of one after another.
+      const [token, user, dbMessage] = await Promise.all([
+        getToken(worxstreamUserId, email, 'outlook'),
+        User.findOne({ worxstreamUserId }),
+        Email.findOne({ id: messageId, email }),
+      ]);
       if (!token) {
         console.error(`❌ Token not found for ${email}`);
         throw new Error('Token not found');
       }
-
-      // Get user from database
-      const user = await User.findOne({ worxstreamUserId });
       if (!user) {
         console.error(`❌ User not found for worxstreamUserId: ${worxstreamUserId}`);
         throw new Error('User not found');
       }
 
-      // Get AI metadata from database first
-      let dbMessage = await Email.findOne({ id: messageId, email: email });
-      let aiMetadata = null;
-      
-      if (dbMessage) {
-        aiMetadata = dbMessage.aiMeta;
+      // Recently opened messages come from memory (their body does not change); read/starred state is always the live one.
+      const cacheKey = `${worxstreamUserId}:${email}:${messageId}`;
+      let outlookMessage = readCache(cacheKey);
+      let processedContent;
+      if (outlookMessage) {
+        processedContent = outlookMessage.content;
       } else {
+        outlookMessage = await getMessageById(token, messageId);
+        if (!outlookMessage) {
+          console.error(`❌ Message ${messageId} not found in Outlook`);
+          throw new Error('Message not found');
+        }
+        processedContent = embedInlineImages(outlookMessage.content, outlookMessage.attachments);
+        writeCache(cacheKey, { ...outlookMessage, content: processedContent });
       }
 
-      // Always fetch fresh message data from Outlook (including attachments)
-      const outlookMessage = await getMessageById(token, messageId);
-      if (!outlookMessage) {
-        console.error(`❌ Message ${messageId} not found in Outlook`);
-        throw new Error('Message not found');
-      }
-
-      // Process content to replace cid: URLs with data URLs for inline attachments
-      let processedContent = outlookMessage.content;
-      if (outlookMessage.attachments && outlookMessage.attachments.length > 0) {
-        outlookMessage.attachments.forEach((attachment) => {
-          if (attachment.contentId && attachment.contentBytes) {
-            const cidUrl = `cid:${attachment.contentId}`;
-            const dataUrl = `data:${attachment.contentType};base64,${attachment.contentBytes}`;
-            
-            // Use global replace to handle multiple occurrences
-            const escapedCidUrl = cidUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            processedContent = processedContent.replace(new RegExp(escapedCidUrl, 'g'), dataUrl);
-          }
-        });
-      }
-
-      // Remove any remaining cid: URLs to prevent browser errors
-      const cidRegex = /cid:([^"'\s>]+)/g;
-      const remainingCids = processedContent.match(cidRegex);
-      if (remainingCids) {
-        processedContent = processedContent.replace(
-          /<img[^>]*src=["']cid:[^"']*["'][^>]*>/gi,
-          '<div style="color: #666; font-style: italic; padding: 10px; border: 1px dashed #ccc; margin: 10px 0;">[Inline image not available]</div>'
-        );
-      }
-
-      // Combine Outlook data with AI metadata from database
+      const live = dbMessage
+        ? { read: dbMessage.read, important: dbMessage.important, flagged: dbMessage.flagged }
+        : {};
       const combinedMessage = {
         ...outlookMessage,
-        content: processedContent, // Use processed content
-        aiMeta: aiMetadata, // Include AI metadata if available
-        dbId: dbMessage?._id?.toString() // Include database ID for short URLs
+        ...live,
+        content: processedContent,
+        aiMeta: dbMessage?.aiMeta || null,
+        dbId: dbMessage?._id?.toString(),
       };
 
-      // If message doesn't exist in DB, save it with AI metadata
+      // A message opened from another folder or a conversation is not saved yet. Answer first, save afterwards.
       if (!dbMessage) {
-        
-        // Check if this email should be assigned to a focus folder
-        let focusFolder = null;
-        try {
-          focusFolder = await focusAssignmentService.assignFocusFolder(
-            outlookMessage, 
-            user._id, 
-            email
-          );
-        } catch (error) {
-          console.error('⚠️ Error assigning focus folder:', error);
-          // Continue without focus folder assignment
-        }
-        
-        const savedMessage = await Email.create({
-          ...outlookMessage,
-          userId: user._id,
-          email: email,
-          focusFolder: focusFolder, // Add focus folder if assigned
-          isProcessed: false
+        const _id = new mongoose.Types.ObjectId();
+        combinedMessage.dbId = _id.toString();
+        this.saveOpenedMessage(_id, outlookMessage, user._id, email).catch((error) => {
+          console.error('⚠️ Could not save opened message:', error?.message || error);
         });
-        
-        // Update the combined message with the new database ID
-        combinedMessage.dbId = savedMessage._id.toString();
       }
 
       return combinedMessage;
@@ -299,6 +281,27 @@ class EmailService {
       console.error('❌ Error getting message:', error);
       throw error;
     }
+  }
+
+  /** Save a message the user opened that was not in the database yet (and give it its focus folder, if any). */
+  async saveOpenedMessage(_id, outlookMessage, userId, email) {
+    let focusFolder = null;
+    try {
+      focusFolder = await focusAssignmentService.assignFocusFolder(outlookMessage, userId, email);
+    } catch (error) {
+      console.error('⚠️ Error assigning focus folder:', error);
+    }
+    const { attachments, ...fields } = outlookMessage;
+    await Email.create({
+      ...fields,
+      _id,
+      folder: fields.folder || 'unknown',
+      timestamp: fields.timestamp ? new Date(fields.timestamp) : new Date(),
+      userId,
+      email,
+      focusFolder,
+      isProcessed: false,
+    });
   }
 
   // New method to mark message as processed

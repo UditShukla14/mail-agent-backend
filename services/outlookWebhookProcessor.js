@@ -39,7 +39,7 @@ async function processCreatedMessage(account, messageId) {
     return;
   }
 
-  const outlookMessage = await getMessageById(accessToken, messageId);
+  const outlookMessage = await getMessageById(accessToken, messageId, { attachments: 'none' });
   if (!outlookMessage) {
     console.error(`❌ Could not fetch message ${messageId} for ${account.email}`);
     return;
@@ -62,6 +62,8 @@ async function processCreatedMessage(account, messageId) {
     folder: folderId,
     important: outlookMessage.important || false,
     flagged: outlookMessage.flagged || false,
+    conversationId: outlookMessage.conversationId || '',
+    hasAttachments: Boolean(outlookMessage.hasAttachments),
     isProcessed: false,
     updatedAt: new Date()
   };

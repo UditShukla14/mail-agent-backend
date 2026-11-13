@@ -18,6 +18,9 @@ const emailSchema = new mongoose.Schema({
   focusFolder: { type: String, default: null }, // Focus folder this email belongs to
   important: { type: Boolean, default: false },
   flagged: { type: Boolean, default: false },
+  // Outlook thread id (every message of a conversation shares it) and whether the message has real (non-inline) attachments
+  conversationId: { type: String, default: '' },
+  hasAttachments: { type: Boolean, default: false },
   
   // AI Enrichment
   aiMeta: {
@@ -47,6 +50,7 @@ const emailSchema = new mongoose.Schema({
 
 // Indexes
 emailSchema.index({ userId: 1, folder: 1 });
+emailSchema.index({ userId: 1, conversationId: 1 });
 emailSchema.index({ userId: 1, timestamp: -1 });
 emailSchema.index({ userId: 1, 'aiMeta.category': 1 });
 emailSchema.index({ userId: 1, 'aiMeta.priority': 1 });

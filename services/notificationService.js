@@ -126,6 +126,8 @@ class NotificationService {
               folder: message.folder,
               important: message.important,
               flagged: message.flagged,
+              conversationId: message.conversationId,
+              hasAttachments: message.hasAttachments,
               isProcessed: message.isProcessed
             },
             timestamp: new Date().toISOString()

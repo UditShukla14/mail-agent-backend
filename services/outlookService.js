@@ -1,6 +1,5 @@
 import { retryTransient, isOutlookUnavailableError } from '../utils/transientRetry.js';
 import axios from 'axios';
-import { simpleParser } from 'mailparser';
 import { debug } from '../utils/logger.js';
 
 function looksLikeHtml(body) {
@@ -151,71 +150,100 @@ async function getMailFolders(accessToken) {
   }
 }
 
-// get mail by id 
-async function getMessageById(accessToken, messageId) {
+// get mail by id
+const MESSAGE_SELECT = 'id,subject,from,toRecipients,ccRecipients,bccRecipients,body,receivedDateTime,isRead,importance,flag,conversationId,hasAttachments,parentFolderId';
+const ATTACHMENT_SELECT = 'id,name,contentType,size,isInline,contentId';
+/** Inline images are embedded in the body, so their bytes come with the message; anything bigger is left out. */
+const INLINE_BYTES_LIMIT = 2 * 1024 * 1024;
+
+const formatAddress = (r) => `${r?.emailAddress?.name || ''} <${r?.emailAddress?.address || ''}>`;
+const escapeHtml = (t) => String(t).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+
+/**
+ * One message for the reading pane. A single small JSON call for the message plus one for the attachment list (run
+ * together), instead of downloading the whole raw message with every attachment inside it. Real attachments come back
+ * as metadata only (`contentBytes: ''`); fetch the bytes when the user downloads one (getAttachmentContent). Inline
+ * images are fetched with the message so the body can show them.
+ *
+ * @param {string} accessToken
+ * @param {string} messageId
+ * @param {{ attachments?: 'inline' | 'none' }} [opts] 'none' skips the attachment calls (push notifications do not need them)
+ */
+async function getMessageById(accessToken, messageId, opts = {}) {
   try {
-    debug(`🔍 Fetching message ${messageId}`);
-    
-    // First get the message metadata including importance
-    const metadataRes = await axios.get(
-      `https://graph.microsoft.com/v1.0/me/messages/${messageId}?$select=id,importance,isRead,flag`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`
+    const headers = { Authorization: `Bearer ${accessToken}`, Prefer: 'outlook.body-content-type="html"' };
+    const base = `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}`;
+
+    const messageReq = retryTransient(() => axios.get(base, { headers, params: { $select: MESSAGE_SELECT } }));
+    const listReq = opts.attachments === 'none'
+      ? Promise.resolve([])
+      : retryTransient(() => axios.get(`${base}/attachments`, { headers, params: { $select: ATTACHMENT_SELECT } }))
+          .then((r) => r.data.value || [])
+          .catch((err) => {
+            console.error('⚠️ Could not list attachments:', err?.response?.status || err.message);
+            return [];
+          });
+    const [{ data: m }, attachmentList] = await Promise.all([messageReq, listReq]);
+
+    const files = attachmentList.filter((a) => a['@odata.type'] === '#microsoft.graph.fileAttachment');
+    const attachments = await Promise.all(files.map(async (a) => {
+      const out = {
+        id: a.id,
+        name: a.name || (a.contentId ? String(a.contentId) : 'attachment'),
+        contentId: a.contentId || undefined,
+        contentType: a.contentType,
+        size: a.size,
+        isInline: Boolean(a.isInline),
+        contentBytes: '',
+      };
+      if (out.isInline && out.size <= INLINE_BYTES_LIMIT) {
+        try {
+          const r = await retryTransient(() => axios.get(`${base}/attachments/${encodeURIComponent(a.id)}`, { headers }));
+          out.contentBytes = r.data.contentBytes || '';
+        } catch (err) {
+          console.error('⚠️ Could not fetch inline image:', err?.response?.status || err.message);
         }
       }
-    );
-
-    // Then fetch raw MIME for content
-    const mimeRes = await axios.get(
-      `https://graph.microsoft.com/v1.0/me/messages/${messageId}/$value`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/octet-stream'
-        },
-        responseType: 'arraybuffer'
-      }
-    );
-
-    // Parse MIME
-    const parsed = await simpleParser(mimeRes.data);
-    debug(`📎 Raw attachments from MIME:`, parsed.attachments);
-
-    // Inline + regular attachments
-    const attachments = parsed.attachments.map(att => ({
-      id: att.cid || att.checksum || att.filename,
-      name: att.filename,
-      contentId: att.cid,
-      contentType: att.contentType,
-      size: att.size || att.content?.length,
-      isInline: !!att.cid,
-      contentBytes: att.content.toString('base64'),
+      return out;
     }));
 
-    debug(`📎 Processed attachments:`, attachments);
+    const body = m.body || {};
+    const content = body.contentType === 'text'
+      ? `<pre style="white-space:pre-wrap;font-family:inherit;margin:0">${escapeHtml(body.content || '')}</pre>`
+      : body.content || '';
 
     return {
-      id: messageId,
-      from: `${parsed.from?.text || ''}`,
-      to: `${parsed.to?.text || ''}`,
-      cc: `${parsed.cc?.text || ''}`,
-      bcc: `${parsed.bcc?.text || ''}`,
-      subject: parsed.subject || '',
-      content: parsed.html || parsed.textAsHtml || '',
-      timestamp: parsed.date?.toISOString() || new Date().toISOString(),
-      read: metadataRes.data.isRead || false,
-      folder: null, // Not available in MIME
-      important: metadataRes.data.importance === "high",
-      flagged: metadataRes.data.flag?.flagStatus === "flagged",
-      attachments
+      id: m.id,
+      from: formatAddress(m.from),
+      to: (m.toRecipients || []).map(formatAddress).join(', '),
+      cc: (m.ccRecipients || []).map(formatAddress).join(', '),
+      bcc: (m.bccRecipients || []).map(formatAddress).join(', '),
+      subject: m.subject || '',
+      content,
+      timestamp: m.receivedDateTime || new Date().toISOString(),
+      read: Boolean(m.isRead),
+      folder: m.parentFolderId || null,
+      important: m.importance === 'high',
+      flagged: m.flag?.flagStatus === 'flagged',
+      conversationId: m.conversationId || '',
+      hasAttachments: attachments.some((a) => !a.isInline),
+      attachments,
     };
   } catch (err) {
-    console.error('❌ Failed to fetch or parse full email MIME:', err?.response?.data || err.message);
+    console.error('❌ Failed to fetch message:', err?.response?.status, err?.response?.data?.error?.message || err.message);
     return null;
   }
 }
 
+/** The bytes of one attachment, fetched when the user downloads it. */
+export async function getAttachmentContent(accessToken, messageId, attachmentId) {
+  const res = await retryTransient(() => axios.get(
+    `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  ));
+  const a = res.data;
+  return { id: a.id, name: a.name, contentType: a.contentType, size: a.size, contentBytes: a.contentBytes || '' };
+}
 
 // get messages by folder
 /** `opts.throwOnError`: surface Graph failures to the caller (sync needs to tell "nothing new" from "failed"); default keeps the old empty-list fallback. */
@@ -223,7 +251,7 @@ async function getMessagesByFolder(accessToken, folderId, nextLink = null, top =
   try {
     const url = nextLink
       ? nextLink
-      : `https://graph.microsoft.com/v1.0/me/mailFolders/${folderId}/messages?$top=${top}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bccRecipients,bodyPreview,body,receivedDateTime,isRead,importance,flag,conversationId`;
+      : `https://graph.microsoft.com/v1.0/me/mailFolders/${folderId}/messages?$top=${top}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,ccRecipients,bccRecipients,bodyPreview,body,receivedDateTime,isRead,importance,flag,conversationId,hasAttachments`;
 
     const res = await retryTransient(() => axios.get(url, {
       headers: { Authorization: `Bearer ${accessToken}` }
@@ -244,7 +272,8 @@ async function getMessagesByFolder(accessToken, folderId, nextLink = null, top =
         folder: folderId,
         important: msg.importance === "high",
         flagged: msg.flag?.flagStatus === "flagged",
-        conversationId: msg.conversationId
+        conversationId: msg.conversationId || '',
+        hasAttachments: Boolean(msg.hasAttachments)
       };
 
       // Ensure all required fields are present
@@ -327,7 +356,7 @@ async function getAttachmentsByMessageId(accessToken, messageId) {
     debug(`📎 Raw attachments for message ${messageId}:`, res.data.value);
 
     const filtered = res.data.value
-      .filter(att => att['@odata.type'] === '#microsoft.graph.fileAttachment' && att.isInline);
+      .filter(att => att['@odata.type'] === '#microsoft.graph.fileAttachment');
 
     debug(`📎 Inline file attachments (filtered):`, filtered);
 
@@ -353,6 +382,50 @@ async function getAttachmentsByMessageId(accessToken, messageId) {
     console.error("❌ Failed to fetch attachments:", err.response?.data || err.message);
     return [];
   }
+}
+
+/**
+ * Light listing of a folder: only the ids and thread ids, 100 per page. Used to give conversation ids to messages that
+ * were saved before threading existed (one Graph call per 100 messages instead of one per message).
+ */
+export async function getFolderThreadIds(accessToken, folderId, nextLink = null) {
+  const url = nextLink || `https://graph.microsoft.com/v1.0/me/mailFolders/${folderId}/messages?$top=100&$orderby=receivedDateTime desc&$select=id,conversationId,hasAttachments`;
+  const res = await retryTransient(() => axios.get(url, { headers: { Authorization: `Bearer ${accessToken}` } }));
+  return {
+    rows: (res.data.value || []).map((m) => ({ id: m.id, conversationId: m.conversationId || '', hasAttachments: Boolean(m.hasAttachments) })),
+    nextLink: res.data['@odata.nextLink'] || null,
+  };
+}
+
+/**
+ * The messages of one conversation (Outlook thread), newest first. Summary fields only: the body of a message is
+ * fetched when the user opens it. Sent replies and other folders are included because Graph filters the whole mailbox.
+ */
+export async function getConversationMessages(accessToken, conversationId) {
+  const id = String(conversationId || '').replace(/'/g, "''");
+  const res = await retryTransient(() => axios.get('https://graph.microsoft.com/v1.0/me/messages', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    params: {
+      $filter: `conversationId eq '${id}'`,
+      $select: 'id,subject,from,toRecipients,bodyPreview,receivedDateTime,isRead,hasAttachments,parentFolderId,importance',
+      $top: 50,
+    },
+  }));
+  const addr = (r) => `${r?.emailAddress?.name || ''} <${r?.emailAddress?.address || ''}>`;
+  return (res.data.value || [])
+    .map((m) => ({
+      id: m.id,
+      from: addr(m.from),
+      to: (m.toRecipients || []).map(addr).join(', '),
+      subject: m.subject || '(No Subject)',
+      preview: m.bodyPreview || '',
+      timestamp: m.receivedDateTime,
+      read: Boolean(m.isRead),
+      hasAttachments: Boolean(m.hasAttachments),
+      folder: m.parentFolderId || '',
+      important: m.importance === 'high',
+    }))
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 }
 
 export const deleteMessage = async (token, messageId) => {
