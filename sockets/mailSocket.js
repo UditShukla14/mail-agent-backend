@@ -457,6 +457,41 @@ export const initMailSocket = (socket, io) => {
     }
   });
 
+  // 🔗 Open a message from its address (/mail/<folder>/<id>): the id may be the short id the list hands out or the provider
+  // id. Answers with the list fields (no body; the page loads that as usual) so the page can open it at once.
+  onAuthed('mail:getMessageSummary', async ({ worxstreamUserId, email, id }) => {
+    if (!email || !id) return;
+    try {
+      const user = await User.findOne({ worxstreamUserId });
+      const isRef = /^[0-9a-f]{24}$/i.test(String(id));
+      const doc = user ? await Email.findOne({ userId: user._id, email, ...(isRef ? { _id: id } : { id }) }).select('-content').lean() : null;
+      socket.emit('mail:messageSummary', {
+        requested: id,
+        found: Boolean(doc),
+        message: doc
+          ? {
+              id: doc.id,
+              dbId: String(doc._id),
+              subject: doc.subject || '(No Subject)',
+              from: doc.from || '',
+              to: doc.to || '',
+              cc: doc.cc || '',
+              timestamp: doc.timestamp ? new Date(doc.timestamp).toISOString() : new Date().toISOString(),
+              read: Boolean(doc.read),
+              folder: doc.folder || null,
+              important: Boolean(doc.important),
+              flagged: Boolean(doc.flagged),
+              conversationId: doc.conversationId || '',
+              hasAttachments: Boolean(doc.hasAttachments),
+            }
+          : null,
+      });
+    } catch (error) {
+      console.error('❌ Error in mail:getMessageSummary:', error.message);
+      socket.emit('mail:messageSummary', { requested: id, found: false, message: null });
+    }
+  });
+
   // 📎 Get attachments separately
   onAuthed('mail:getAttachments', async ({ worxstreamUserId, email, messageId }) => {
     try {
