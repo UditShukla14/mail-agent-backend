@@ -59,7 +59,16 @@ const emailAccountSchema = new mongoose.Schema({
   outlookInboxFolderId: {
     type: String,
     default: null
-  }
+  },
+  // What the push subscription watches ('/me/messages' = every folder; created, updated and deleted)
+  graphSubscriptionResource: {
+    type: String,
+    default: null
+  },
+  // The date range chosen for the last clean-and-resync; later full passes start from syncFrom
+  syncFrom: { type: Date, default: null },
+  syncTo: { type: Date, default: null },
+  lastSyncAt: { type: Date, default: null }
 }, {
   timestamps: true
 });

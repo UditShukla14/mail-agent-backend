@@ -4,6 +4,10 @@ import mongoose from 'mongoose';
 const syncJobSchema = new mongoose.Schema({
   worxstreamUserId: { type: Number, required: true },
   email: { type: String, required: true },
+  /** 'sync' = Sync all (delta); 'cleanResync' = rebuild from Outlook for a date range. */
+  kind: { type: String, enum: ['sync', 'cleanResync'], default: 'sync' },
+  /** The date range of a cleanResync. */
+  range: { since: { type: Date, default: null }, until: { type: Date, default: null } },
   status: { type: String, enum: ['running', 'done', 'failed', 'interrupted'], required: true },
   startedAt: { type: Date, required: true },
   finishedAt: { type: Date, default: null },

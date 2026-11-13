@@ -59,13 +59,64 @@ assert.deepEqual(r.data.emails.map((e) => e.id), ['k3']);
 // folders: with no Outlook connection the stored folders are still listed, with counts
 r = await call(api.listFolders, 16);
 const folders = r.data[0].folders;
-assert.deepEqual(folders.map((f) => [f.id, f.stored, f.unread]).sort(), [['inbox', 2, 1], ['sent', 1, 0]]);
+assert.deepEqual(folders.map((f) => [f.id, f.stored, f.storedUnread]).sort(), [['inbox', 2, 1], ['sent', 1, 0]]);
+assert.equal(r.data[0].source, 'stored');
 assert.deepEqual((await call(api.listFolders, 64)).data, []); // no account connected: nothing to list
+
+// ---- the short ref works everywhere, and a wrong account hint never hides your own mail ----
+const k3 = await Email.findOne({ id: 'k3' }).lean();
+r = await call(api.searchEmails, 16, { query: { from: 'kevin' } });
+assert.equal(r.data.emails.find((e) => e.id === 'k3').ref, String(k3._id)); // search hands out the short ref
+r = await call(api.getEmailMessage, 16, { params: { id: String(k3._id) } });
+assert.equal(r.data.id, 'k3'); // by ref
+r = await call(api.getEmailMessage, 16, { params: { id: 'k3' }, query: { email: 'someone@else.com' } });
+assert.equal(r.data.id, 'k3'); // hint names an account that is not the user's: ignored
+await EmailAccount.create({ userId: kevin._id, email: 'prasad@acunitsforless.com', provider: 'outlook' });
+r = await call(api.getEmailMessage, 16, { params: { id: 'k3' }, query: { email: 'prasad@acunitsforless.com' } });
+assert.equal(r.data.id, 'k3'); // hint names another of the user's accounts: still found
+assert.equal((await call(api.getEmailMessage, 64, { params: { id: String(k3._id) } })).code, 404); // never someone else's
+
+// the thread from the ref of any message in it, even with the wrong account hint
+r = await call(api.getConversation, 16, { params: { conversationId: String(k3._id) }, query: { email: 'prasad@acunitsforless.com' } });
+assert.deepEqual(r.data.messages.map((m) => m.id), ['k1', 'k2', 'k3']);
+assert.equal(r.data.conversationId, 'c1');
+
+// saved before conversation ids existed: the same subject (without Re:/Fwd:) stands in for the thread
+await Email.insertMany([
+  row('l1', 500, { conversationId: '', subject: 'Pickup schedule', content: '<p>First note.</p>' }),
+  row('l2', 400, { conversationId: '', subject: 'RE: Pickup schedule', content: '<p>Reply.</p>' }),
+  row('l3', 390, { conversationId: '', subject: 'Unrelated', content: '<p>Other.</p>' }),
+]);
+const l2 = await Email.findOne({ id: 'l2' }).lean();
+r = await call(api.getConversation, 16, { params: { conversationId: String(l2._id) } });
+assert.deepEqual(r.data.messages.map((m) => m.id), ['l1', 'l2']);
+assert.equal(r.data.conversationId, null);
+// a lone legacy message is a thread of one, not an error
+const l3 = await Email.findOne({ id: 'l3' }).lean();
+r = await call(api.getConversation, 16, { params: { conversationId: String(l3._id) } });
+assert.deepEqual(r.data.messages.map((m) => m.id), ['l3']);
 
 // attachments need the mailbox connection: without one it says so instead of failing
 r = await call(api.listAttachments, 16, { params: { id: 'k3' } });
 assert.equal(r.code, 409);
 assert.equal((await call(api.listAttachments, 64, { params: { id: 'k3' } })).code, 404);
+
+// live search: needs at least one thing to look for, and says so when a mailbox connection has expired
+r = await call(api.liveSearch, 16, { query: {} });
+assert.equal(r.code, 400);
+r = await call(api.liveSearch, 16, { query: { from: 'kevin' } });
+assert.equal(r.success, true);
+assert.deepEqual(r.data.emails, []);
+assert.equal(r.data.query, 'from:kevin');
+assert.deepEqual(r.data.accountsNotSearched.map((a) => a.error), ['connection expired', 'connection expired']); // no Outlook token in this test database
+assert.equal((await call(api.liveSearch, 999, { query: { from: 'kevin' } })).data.emails.length, 0);
+
+// sync status: how fresh the stored copy is
+r = await call(api.syncStatus, 16);
+const st = r.data.find((a) => a.email === 'udit@alphaparktech.com');
+assert.equal(st.stored.messages, 6); // k1, k2, k3 and the three older ones
+assert.equal(st.push.active, false);
+assert.equal(st.lastJob, null);
 
 console.log('mail-api integration: ok');
 await mongoose.disconnect();

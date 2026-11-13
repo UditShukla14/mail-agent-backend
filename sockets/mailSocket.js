@@ -287,6 +287,20 @@ export const initMailSocket = (socket, io) => {
     }
   });
 
+  // 🧹 Clean the stored copy of an account and rebuild it from Outlook for a date range (background job, same status
+  // channel as sync-all). Destructive for the stored copy, so the client must send `confirm: true`.
+  onAuthed('mail:cleanResync', async ({ worxstreamUserId, email, since, until, confirm }) => {
+    if (!email) return socket.emit('mail:error', 'email is required');
+    if (confirm !== true) return socket.emit('mail:error', 'Clean and resync needs to be confirmed.');
+    try {
+      const { status } = await startAccountSync(worxstreamUserId, email, { kind: 'cleanResync', range: { since, until } });
+      socket.emit('mail:syncAllStatus', status);
+    } catch (error) {
+      console.error('❌ Error in mail:cleanResync:', error.message);
+      socket.emit('mail:error', error.message || 'Failed to start the resync');
+    }
+  });
+
   // The latest sync-all status of an account (a page that opens while one is running picks it up from here).
   onAuthed('mail:getSyncAllStatus', async ({ worxstreamUserId, email }) => {
     if (!email) return;

@@ -1,6 +1,9 @@
 import { retryTransient, isOutlookUnavailableError } from '../utils/transientRetry.js';
 import axios from 'axios';
 import { debug } from '../utils/logger.js';
+import { installGraphDefaults } from './graphDefaults.js';
+
+installGraphDefaults(); // immutable ids on every Graph call (see graphDefaults.js)
 
 function looksLikeHtml(body) {
   return /<\/?[a-z][\s\S]*>/i.test(String(body || ''));
@@ -126,18 +129,9 @@ async function replyAllToEmail(accessToken, { messageId, comment, toRecipients, 
 // get folders with count 
 async function getMailFolders(accessToken) {
   try {
-    const res = await retryTransient(() => axios.get('https://graph.microsoft.com/v1.0/me/mailFolders', {
-      headers: {
-        Authorization: `Bearer ${accessToken}`
-      }
-    }));
-
-    const folders = res.data.value.map(folder => ({
-      id: folder.id,
-      displayName: folder.displayName,
-      totalItemCount: folder.totalItemCount,
-      unreadItemCount: folder.unreadItemCount
-    }));
+    // Every folder, paged (the plain call returns only the first 10 top-level folders); sub-folders as "Parent/Child".
+    const all = await listAllFolders(accessToken);
+    const folders = all.map((f) => ({ id: f.id, displayName: f.path, totalItemCount: f.totalItemCount, unreadItemCount: f.unreadItemCount }));
 
     debug(`📂 Retrieved ${folders.length} folders`);
     return folders;
@@ -235,6 +229,69 @@ async function getMessageById(accessToken, messageId, opts = {}) {
   } catch (err) {
     console.error('❌ Failed to fetch message:', err?.response?.status, err?.response?.data?.error?.message || err.message);
     return null;
+  }
+}
+
+const THREAD_SELECT = 'id,conversationId,subject,from,toRecipients,ccRecipients,receivedDateTime,isRead,importance,flag,hasAttachments,parentFolderId,bodyPreview,uniqueBody';
+const asText = { Prefer: 'outlook.body-content-type="text"' };
+const squeeze = (t) => String(t || '').replace(/\r/g, '').replace(/[ \t]+/g, ' ').replace(/\n\s*\n\s*\n+/g, '\n\n').trim();
+
+/** One Graph message as a thread entry. `uniqueBody` is Outlook's own "the part of this message that is new" (no quoted history). */
+export function shapeThreadMessage(m) {
+  const addr = (r) => `${r?.emailAddress?.name || ''} <${r?.emailAddress?.address || ''}>`;
+  return {
+    id: m.id,
+    conversationId: m.conversationId || '',
+    folder: m.parentFolderId || '',
+    from: addr(m.from),
+    to: (m.toRecipients || []).map(addr).join(', '),
+    cc: (m.ccRecipients || []).map(addr).join(', '),
+    subject: m.subject || '(No Subject)',
+    timestamp: m.receivedDateTime || null,
+    read: Boolean(m.isRead),
+    important: m.importance === 'high',
+    flagged: m.flag?.flagStatus === 'flagged',
+    hasAttachments: Boolean(m.hasAttachments),
+    preview: String(m.bodyPreview || '').slice(0, 200),
+    /** null when Outlook has no unique body for it (then the caller falls back to the stored body). */
+    text: m.uniqueBody?.content ? squeeze(m.uniqueBody.content) : null,
+  };
+}
+
+/**
+ * The whole conversation straight from Outlook, oldest first, in every folder (Sent, Archive, ...), each message with its
+ * own new text. Not limited to what has been synced.
+ */
+export async function getConversationLive(accessToken, conversationId) {
+  const id = String(conversationId || '').replace(/'/g, "''");
+  const res = await retryTransient(() => axios.get('https://graph.microsoft.com/v1.0/me/messages', {
+    headers: { Authorization: `Bearer ${accessToken}`, ...asText },
+    params: { $filter: `conversationId eq '${id}'`, $select: THREAD_SELECT, $top: 25 },
+  }));
+  return (res.data.value || []).map(shapeThreadMessage).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+}
+
+/** The new text of one message (Outlook's uniqueBody, plain text), or null when it has none. */
+export async function getMessageUniqueText(accessToken, messageId) {
+  const res = await retryTransient(() => axios.get(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}`, {
+    headers: { Authorization: `Bearer ${accessToken}`, ...asText },
+    params: { $select: 'id,uniqueBody' },
+  }));
+  const content = res.data?.uniqueBody?.content;
+  return content ? squeeze(content) : null;
+}
+
+/** One message's list fields (read state, flags, folder, conversation). Returns null when the message no longer exists. */
+export async function getMessageMeta(accessToken, messageId) {
+  try {
+    const res = await retryTransient(() => axios.get(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { $select: META_SELECT },
+    }));
+    return mapGraphMessage(res.data, res.data.parentFolderId);
+  } catch (err) {
+    if (err?.response?.status === 404) return null;
+    throw err;
   }
 }
 
@@ -403,8 +460,9 @@ async function getAttachmentsByMessageId(accessToken, messageId) {
 }
 
 /**
- * Every folder of the mailbox, sub-folders included (the plain folder list only returns the first top-level folders).
- * @returns {Promise<Array<{ id: string, displayName: string, path: string }>>}
+ * Every folder of the mailbox, sub-folders included (the plain folder list only returns the first top-level folders),
+ * with item counts. `path` is "Parent/Child".
+ * @returns {Promise<Array<{ id: string, displayName: string, path: string, totalItemCount: number, unreadItemCount: number }>>}
  */
 export async function listAllFolders(accessToken) {
   const headers = { Authorization: `Bearer ${accessToken}` };
@@ -412,10 +470,10 @@ export async function listAllFolders(accessToken) {
   const walk = async (url, parentPath) => {
     let next = url;
     while (next) {
-      const res = await retryTransient(() => axios.get(next, { headers, params: next.includes('?') ? undefined : { $top: 100, $select: 'id,displayName,childFolderCount' } }));
+      const res = await retryTransient(() => axios.get(next, { headers, params: next.includes('?') ? undefined : { $top: 100, $select: 'id,displayName,childFolderCount,totalItemCount,unreadItemCount' } }));
       for (const f of res.data.value || []) {
         const path = parentPath ? `${parentPath}/${f.displayName}` : f.displayName;
-        out.push({ id: f.id, displayName: f.displayName, path });
+        out.push({ id: f.id, displayName: f.displayName, path, totalItemCount: f.totalItemCount ?? 0, unreadItemCount: f.unreadItemCount ?? 0 });
         if (f.childFolderCount > 0) {
           await walk(`https://graph.microsoft.com/v1.0/me/mailFolders/${encodeURIComponent(f.id)}/childFolders`, path);
         }
@@ -425,6 +483,119 @@ export async function listAllFolders(accessToken) {
   };
   await walk('https://graph.microsoft.com/v1.0/me/mailFolders', '');
   return out;
+}
+
+const WELL_KNOWN = ['inbox', 'sentitems', 'drafts', 'deleteditems', 'archive', 'junkemail', 'outbox'];
+
+/**
+ * Ids of the standard folders (Inbox, Sent Items, Drafts, Deleted Items, Archive, Junk, Outbox) in ONE $batch call.
+ * Folders the mailbox does not have (for example no Archive) are left out.
+ * @returns {Promise<Record<string, string>>} well-known name -> folder id
+ */
+export async function wellKnownFolderIds(accessToken) {
+  const res = await retryTransient(() => axios.post('https://graph.microsoft.com/v1.0/$batch', {
+    requests: WELL_KNOWN.map((name, i) => ({ id: String(i + 1), method: 'GET', url: `/me/mailFolders/${name}?$select=id` })),
+  }, { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }));
+  const out = {};
+  for (const r of res.data.responses || []) {
+    if (r.status === 200 && r.body?.id) out[WELL_KNOWN[Number(r.id) - 1]] = r.body.id;
+  }
+  return out;
+}
+
+/** Graph message -> the shape the stored mailbox uses (the body only when asked for). */
+export function mapGraphMessage(msg, folderId) {
+  const addr = (r) => `${r?.emailAddress?.name || ''} <${r?.emailAddress?.address || ''}>`;
+  return {
+    id: msg.id,
+    from: addr(msg.from),
+    to: (msg.toRecipients || []).map(addr).join(', '),
+    cc: (msg.ccRecipients || []).map(addr).join(', '),
+    bcc: (msg.bccRecipients || []).map(addr).join(', '),
+    subject: msg.subject || '(No Subject)',
+    preview: msg.bodyPreview || '',
+    ...(msg.body ? { content: msg.body.content || '' } : {}),
+    timestamp: msg.receivedDateTime,
+    read: Boolean(msg.isRead),
+    important: msg.importance === 'high',
+    flagged: msg.flag?.flagStatus === 'flagged',
+    conversationId: msg.conversationId || '',
+    hasAttachments: Boolean(msg.hasAttachments),
+    folder: msg.parentFolderId || folderId,
+  };
+}
+
+const META_SELECT = 'id,subject,from,toRecipients,ccRecipients,bccRecipients,bodyPreview,receivedDateTime,isRead,importance,flag,conversationId,hasAttachments,parentFolderId';
+const iso = (d) => new Date(d).toISOString();
+
+/**
+ * A page (100) of one folder's messages received between `since` and `until` (either may be omitted), newest first.
+ * Uses the standard $filter on receivedDateTime. `withBody` adds the message body (needed for AI analysis).
+ */
+export async function listFolderMessagesRange(accessToken, folderId, { since, until, nextLink = null, withBody = false } = {}) {
+  const url = nextLink || `https://graph.microsoft.com/v1.0/me/mailFolders/${encodeURIComponent(folderId)}/messages`;
+  const filter = [since && `receivedDateTime ge ${iso(since)}`, until && `receivedDateTime le ${iso(until)}`].filter(Boolean).join(' and ');
+  const res = await retryTransient(() => axios.get(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    params: nextLink ? undefined : {
+      $top: 100,
+      $orderby: 'receivedDateTime desc',
+      $select: withBody ? `${META_SELECT},body` : META_SELECT,
+      ...(filter ? { $filter: filter } : {}),
+    },
+  }));
+  return { rows: (res.data.value || []).map((m) => mapGraphMessage(m, folderId)), nextLink: res.data['@odata.nextLink'] || null };
+}
+
+/**
+ * One page of a folder's DELTA: what was created or changed (rows) and what was deleted or moved out (removed ids) since
+ * the last sync. Follow `nextLink` until a page returns `deltaLink`; keep that link and pass it as `link` next time to get
+ * only the changes since. A 410 answer means the saved link expired: start again without it. `since` limits a first
+ * (full) pass to recent mail.
+ */
+export async function deltaFolderMessages(accessToken, folderId, link = null, { since } = {}) {
+  const url = link || `https://graph.microsoft.com/v1.0/me/mailFolders/${encodeURIComponent(folderId)}/messages/delta`;
+  const res = await retryTransient(() => axios.get(url, {
+    headers: { Authorization: `Bearer ${accessToken}`, Prefer: 'odata.maxpagesize=100' },
+    params: link ? undefined : { $select: META_SELECT, ...(since ? { $filter: `receivedDateTime ge ${iso(since)}` } : {}) },
+  }));
+  const rows = [];
+  const removed = [];
+  for (const m of res.data.value || []) {
+    if (m['@removed']) removed.push(m.id);
+    else rows.push(mapGraphMessage(m, folderId));
+  }
+  return { rows, removed, nextLink: res.data['@odata.nextLink'] || null, deltaLink: res.data['@odata.deltaLink'] || null };
+}
+
+/** Builds a $search (KQL) string from separate parts. Values are quoted and cleaned so they cannot change the query. */
+export function buildKql({ q, from, to, subject, hasAttachments } = {}) {
+  const clean = (v) => String(v).replace(/["\\]/g, ' ').replace(/\s+/g, ' ').trim();
+  const part = (key, v) => {
+    const value = v ? clean(v) : '';
+    if (!value) return '';
+    return value.includes(' ') ? `${key}:"${value}"` : `${key}:${value}`;
+  };
+  return [
+    q && clean(q) ? clean(q) : '',
+    part('from', from),
+    part('to', to),
+    part('subject', subject),
+    hasAttachments ? 'hasattachments:true' : '',
+  ].filter(Boolean).join(' ');
+}
+
+/**
+ * Searches the WHOLE mailbox on Outlook's side (any folder, message bodies, mail that was never synced) with $search.
+ * Results are ranked by relevance; $search cannot be combined with $filter or $orderby, so dates are applied by the caller.
+ */
+export async function searchMessagesLive(accessToken, kql, { top = 25 } = {}) {
+  if (!kql) return [];
+  const res = await retryTransient(() => axios.get('https://graph.microsoft.com/v1.0/me/messages', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    params: { $search: `"${kql.replace(/"/g, '\\"')}"`, $top: Math.min(Math.max(top, 1), 50), $select: META_SELECT },
+  }));
+  return (res.data.value || []).map((m) => mapGraphMessage(m, m.parentFolderId));
 }
 
 /**

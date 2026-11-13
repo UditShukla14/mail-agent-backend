@@ -1,15 +1,15 @@
-import Email from '../models/email.js';
 import User from '../models/User.js';
 import { getToken } from '../utils/tokenManager.js';
-import { getMessageById } from './outlookService.js';
+import { getMessageById, getMessageMeta } from './outlookService.js';
 import enrichmentQueueService from './enrichmentQueueService.js';
 import notificationService from './notificationService.js';
+import { applyMessageChange } from './messageChanges.js';
+import { debug } from '../utils/logger.js';
 import {
   findAccountBySubscriptionId,
   verifyClientState,
   recreateSubscriptionForAccount
 } from './outlookSubscriptionService.js';
-import { debug } from '../utils/logger.js';
 
 function extractMessageId(notification) {
   if (notification.resourceData?.id) {
@@ -21,9 +21,8 @@ function extractMessageId(notification) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-async function processCreatedMessage(account, messageId) {
-  const worxstreamUserId = account.worxstreamUserId;
-  if (!worxstreamUserId) {
+async function processChange(account, changeType, messageId) {
+  if (!account.worxstreamUserId) {
     const user = await User.findById(account.userId);
     if (!user) {
       console.error(`❌ No user for EmailAccount ${account._id}`);
@@ -35,57 +34,22 @@ async function processCreatedMessage(account, messageId) {
 
   const accessToken = await getToken(account.worxstreamUserId, account.email, 'outlook');
   if (!accessToken) {
-    console.error(`❌ No token to fetch webhook message for ${account.email}`);
+    console.error(`❌ No token to apply a ${changeType} notification for ${account.email}`);
     return;
   }
 
-  const outlookMessage = await getMessageById(accessToken, messageId, { attachments: 'none' });
-  if (!outlookMessage) {
-    console.error(`❌ Could not fetch message ${messageId} for ${account.email}`);
-    return;
-  }
-
-  const folderId = account.outlookInboxFolderId || 'inbox';
-  const emailData = {
-    id: outlookMessage.id,
-    userId: account.userId,
-    email: account.email,
-    from: outlookMessage.from || '',
-    to: outlookMessage.to || '',
-    cc: outlookMessage.cc || '',
-    bcc: outlookMessage.bcc || '',
-    subject: outlookMessage.subject || '(No Subject)',
-    content: outlookMessage.content || '',
-    preview: (outlookMessage.content || '').replace(/<[^>]+>/g, '').slice(0, 200),
-    timestamp: outlookMessage.timestamp ? new Date(outlookMessage.timestamp) : new Date(),
-    read: outlookMessage.read || false,
-    folder: folderId,
-    important: outlookMessage.important || false,
-    flagged: outlookMessage.flagged || false,
-    conversationId: outlookMessage.conversationId || '',
-    hasAttachments: Boolean(outlookMessage.hasAttachments),
-    isProcessed: false,
-    updatedAt: new Date()
-  };
-
-  // Graph can deliver the same notification more than once; only the first one enriches and notifies.
-  const alreadyKnown = await Email.exists({ id: emailData.id, email: account.email });
-
-  const saved = await Email.findOneAndUpdate(
-    { id: emailData.id, email: account.email },
-    { $set: emailData },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  );
-
-  if (alreadyKnown) return;
-
-  try {
-    await enrichmentQueueService.addToQueue([saved]);
-  } catch (err) {
-    console.error(`❌ Failed to enqueue enrichment for ${saved.id}:`, err.message);
-  }
-
-  notificationService.notifyNewMail(account.worxstreamUserId, account.email, saved);
+  await applyMessageChange({
+    account,
+    changeType,
+    messageId,
+    deps: {
+      getMeta: (id) => getMessageMeta(accessToken, id),
+      getFull: (id) => getMessageById(accessToken, id, { attachments: 'none' }),
+      enqueueEnrichment: (docs) => enrichmentQueueService.addToQueue(docs),
+      notifyNew: (doc) => notificationService.notifyNewMail(account.worxstreamUserId, account.email, doc),
+      notify: (event, payload) => notificationService.notifyUser(account.worxstreamUserId, event, payload),
+    },
+  });
 }
 
 async function processLifecycle(notification, account) {
@@ -105,7 +69,7 @@ async function processLifecycle(notification, account) {
   }
 
   if (event === 'missed') {
-    console.warn(`⚠️ Missed notifications for ${account.email} — client should sync inbox`);
+    console.warn(`⚠️ Missed notifications for ${account.email} — a Sync all will catch up`);
   }
 }
 
@@ -131,13 +95,13 @@ export async function processOutlookNotifications(notifications) {
         continue;
       }
 
-      if (notification.changeType === 'created') {
+      if (['created', 'updated', 'deleted'].includes(notification.changeType)) {
         const messageId = extractMessageId(notification);
         if (!messageId) {
           console.warn('⚠️ Outlook notification missing message id:', notification.resource);
           continue;
         }
-        await processCreatedMessage(account, messageId);
+        await processChange(account, notification.changeType, messageId);
       }
     } catch (err) {
       console.error('❌ Error processing Outlook notification:', err?.response?.data || err.message);

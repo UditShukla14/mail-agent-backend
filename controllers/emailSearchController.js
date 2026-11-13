@@ -2,7 +2,9 @@ import Email from '../models/email.js';
 import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
 import { getToken } from '../utils/tokenManager.js';
-import { getMessageById, listAllFolders, listAttachmentMeta } from '../services/outlookService.js';
+import { getMessageById, listAllFolders, listAttachmentMeta, getConversationLive, getMessageUniqueText, buildKql, searchMessagesLive, wellKnownFolderIds } from '../services/outlookService.js';
+import SyncJob from '../models/SyncJob.js';
+import SyncState from '../models/SyncState.js';
 
 const MAX_LIMIT = 25;
 const DEFAULT_LIMIT = 10;
@@ -74,6 +76,8 @@ async function loadScope(req) {
 }
 
 const summarize = (doc) => ({
+  /** Short handle (24 characters) that is easy to pass back exactly; the long provider id in `id` works too. */
+  ref: String(doc._id),
   id: doc.id,
   email: doc.email,
   folder: doc.folder,
@@ -96,6 +100,26 @@ const summarize = (doc) => ({
       }
     : null,
 });
+
+
+const isRef = (value) => /^[0-9a-f]{24}$/i.test(String(value || ''));
+
+/**
+ * One of the user's messages by its short `ref` or its provider `id`. The account address is only a hint to pick the
+ * right one when it applies; it never hides a message the user owns (a model that names the wrong account still finds it).
+ */
+async function findOwnedEmail(scope, idOrRef, accountHint) {
+  const base = { userId: scope.user._id, email: { $in: scope.accountEmails }, ...(isRef(idOrRef) ? { _id: idOrRef } : { id: idOrRef }) };
+  if (accountHint && scope.accountEmails.includes(accountHint)) {
+    const hinted = await Email.findOne({ ...base, email: accountHint }).lean();
+    if (hinted) return hinted;
+  }
+  const doc = await Email.findOne(base).lean();
+  if (!doc) console.warn(`📭 Email lookup found nothing (${isRef(idOrRef) ? 'ref' : 'id'} of ${String(idOrRef).length} chars, account hint: ${accountHint || 'none'})`);
+  return doc;
+}
+
+const escapeSubject = (subject) => escapeRegex(String(subject || '').replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, '').trim());
 
 export const searchEmails = async (req, res) => {
   try {
@@ -122,13 +146,18 @@ export const getEmailMessage = async (req, res) => {
   try {
     const scope = await loadScope(req);
     if (!scope) return res.status(404).json({ success: false, error: 'User not found' });
+    const doc = await findOwnedEmail(scope, req.params.id, req.query.email);
+    if (!doc) return res.status(404).json({ success: false, error: 'Email not found. Use the ref (or id) exactly as search_mail returned it.' });
 
-    const query = { userId: scope.user._id, email: { $in: scope.accountEmails }, id: req.params.id };
-    if (req.query.email && scope.accountEmails.includes(req.query.email)) query.email = req.query.email;
-    const doc = await Email.findOne(query).lean();
-    if (!doc) return res.status(404).json({ success: false, error: 'Email not found' });
-
-    const { text, truncated } = toPlainText(doc.content || doc.preview);
+    let { text, truncated } = toPlainText(doc.content || doc.preview);
+    // Outlook knows which part of the message is new (the rest is quoted history): prefer that when it is reachable.
+    try {
+      const token = await getToken(scope.user.worxstreamUserId, doc.email, 'outlook');
+      const unique = token ? await getMessageUniqueText(token, doc.id) : null;
+      if (unique) ({ text, truncated } = { text: unique.slice(0, BODY_CHAR_LIMIT), truncated: unique.length > BODY_CHAR_LIMIT });
+    } catch {
+      // the stored copy is the fallback
+    }
     res.json({ success: true, data: { ...summarize(doc), to: doc.to || '', cc: doc.cc || '', body: text, bodyTruncated: truncated } });
   } catch (error) {
     console.error('Error reading email:', error.message);
@@ -155,10 +184,54 @@ export const getConversation = async (req, res) => {
   try {
     const scope = await loadScope(req);
     if (!scope) return res.status(404).json({ success: false, error: 'User not found' });
-    const query = { userId: scope.user._id, email: { $in: scope.accountEmails }, conversationId: req.params.conversationId };
-    if (req.query.email && scope.accountEmails.includes(req.query.email)) query.email = req.query.email;
-    const docs = await Email.find(query).sort({ timestamp: -1 }).limit(THREAD_MESSAGE_LIMIT).lean();
-    if (docs.length === 0) return res.status(404).json({ success: false, error: 'Conversation not found' });
+    const base = { userId: scope.user._id, email: { $in: scope.accountEmails } };
+
+    // The path may be a conversationId, or the short ref of any message in the thread (easier to pass back exactly).
+    let conversationId = req.params.conversationId;
+    let seed = null;
+    if (isRef(conversationId)) {
+      seed = await findOwnedEmail(scope, conversationId, req.query.email);
+      if (!seed) return res.status(404).json({ success: false, error: 'Conversation not found. Use a conversationId or ref exactly as search_mail returned it.' });
+      conversationId = seed.conversationId || '';
+    }
+
+    let docs = [];
+    if (conversationId) {
+      docs = await Email.find({ ...base, conversationId }).sort({ timestamp: -1 }).limit(THREAD_MESSAGE_LIMIT).lean();
+    } else if (seed) {
+      // Saved before conversation ids existed: the messages with the same subject (without Re:/Fwd:) stand in for the thread.
+      docs = await Email.find({ ...base, subject: { $regex: `^\\s*((re|fw|fwd)\\s*:\\s*)*${escapeSubject(seed.subject)}\\s*$`, $options: 'i' } }).sort({ timestamp: -1 }).limit(THREAD_MESSAGE_LIMIT).lean();
+      if (docs.length === 0) docs = [seed];
+    }
+    if (docs.length === 0) return res.status(404).json({ success: false, error: 'Conversation not found. Use a conversationId or ref exactly as search_mail returned it.' });
+
+    // Preferred: the thread straight from Outlook (every folder, each message's own new text), so it does not depend
+    // on what has been synced. The stored copy below is the fallback.
+    const anchor = seed || docs[0];
+    try {
+      const token = anchor ? await getToken(scope.user.worxstreamUserId, anchor.email, 'outlook') : null;
+      const liveId = conversationId || anchor?.conversationId;
+      const live = token && liveId ? await getConversationLive(token, liveId) : [];
+      if (live.length > 0) {
+        const stored = await Email.find({ ...base, id: { $in: live.map((m) => m.id) } }, { _id: 1, id: 1, aiMeta: 1 }).lean();
+        const byId = new Map(stored.map((d) => [d.id, d]));
+        const newest = new Set(live.slice(-THREAD_BODY_COUNT).map((m) => m.id));
+        const messages = live.map(({ text, ...m }) => {
+          const known = byId.get(m.id);
+          const body = text ?? null;
+          return {
+            ref: known ? String(known._id) : undefined,
+            email: anchor.email,
+            ...m,
+            ...(known?.aiMeta ? { aiMeta: { summary: known.aiMeta.summary || '', category: known.aiMeta.category || null, priority: known.aiMeta.priority || null, sentiment: known.aiMeta.sentiment || null, actionItems: known.aiMeta.actionItems || [] } } : {}),
+            ...(newest.has(m.id) && body ? { body: body.slice(0, THREAD_BODY_CHARS) } : {}),
+          };
+        });
+        return res.json({ success: true, data: { conversationId: liveId, count: messages.length, order: 'oldest_first', source: 'outlook', messages } });
+      }
+    } catch (error) {
+      console.warn('⚠️ Live conversation read failed, using the stored copy:', error?.response?.status || error.message);
+    }
 
     // Text for the newest messages: the stored body, or fetched from Outlook when only the list data was synced.
     const withBodies = docs.slice(0, THREAD_BODY_COUNT);
@@ -182,14 +255,14 @@ export const getConversation = async (req, res) => {
         ...(texts.has(doc.id) ? { body: texts.get(doc.id) } : {}),
       }))
       .reverse(); // oldest first reads like the conversation
-    res.json({ success: true, data: { conversationId: req.params.conversationId, count: messages.length, order: 'oldest_first', messages } });
+    res.json({ success: true, data: { conversationId: conversationId || null, count: messages.length, order: 'oldest_first', messages } });
   } catch (error) {
     console.error('Error reading conversation:', error.message);
     res.status(500).json({ success: false, error: 'Failed to read conversation' });
   }
 };
 
-/** The user's folders per connected account (names from Outlook, counts from the stored mailbox). */
+/** The user's folders per connected account: Outlook's names and counts, which one is Inbox/Sent/Archive..., and how much of it is stored. */
 export const listFolders = async (req, res) => {
   try {
     const scope = await loadScope(req);
@@ -200,20 +273,33 @@ export const listFolders = async (req, res) => {
       { $match: { userId: scope.user._id, email: { $in: emails } } },
       { $group: { _id: { email: '$email', folder: '$folder' }, total: { $sum: 1 }, unread: { $sum: { $cond: ['$read', 0, 1] } } } },
     ]);
-    const countOf = (email, folder) => counts.find((c) => c._id.email === email && c._id.folder === folder) || { total: 0, unread: 0 };
+    const stored = (email, folder) => counts.find((c) => c._id.email === email && c._id.folder === folder) || { total: 0, unread: 0 };
 
     const data = await Promise.all(emails.map(async (email) => {
-      let names = [];
+      let live = [];
+      let standard = {};
       try {
         const token = await getToken(scope.user.worxstreamUserId, email, 'outlook');
-        if (token) names = await listAllFolders(token);
+        if (token) [live, standard] = await Promise.all([listAllFolders(token), wellKnownFolderIds(token).catch(() => ({}))]);
       } catch {
         // names are a convenience: fall back to the folder ids we hold
       }
-      const known = names.length ? names : [...new Set(counts.filter((c) => c._id.email === email).map((c) => c._id.folder))].map((id) => ({ id, displayName: id, path: id }));
+      const tag = new Map(Object.entries(standard).map(([name, id]) => [id, name]));
+      const known = live.length
+        ? live
+        : [...new Set(counts.filter((c) => c._id.email === email).map((c) => c._id.folder))].map((id) => ({ id, displayName: id, path: id }));
       return {
         email,
-        folders: known.map((f) => ({ id: f.id, name: f.displayName, path: f.path, ...pick(countOf(email, f.id)) })),
+        source: live.length ? 'outlook' : 'stored',
+        folders: known.map((f) => ({
+          id: f.id,
+          name: f.displayName,
+          path: f.path,
+          ...(tag.has(f.id) ? { wellKnown: tag.get(f.id) } : {}),
+          ...(f.totalItemCount != null ? { total: f.totalItemCount, unread: f.unreadItemCount } : {}),
+          stored: stored(email, f.id).total,
+          storedUnread: stored(email, f.id).unread,
+        })),
       };
     }));
     res.json({ success: true, data });
@@ -222,17 +308,106 @@ export const listFolders = async (req, res) => {
     res.status(500).json({ success: false, error: 'Failed to list folders' });
   }
 };
-const pick = (c) => ({ stored: c.total, unread: c.unread });
+
+/**
+ * Search the WHOLE mailbox on Outlook's side ($search): any folder, message bodies, mail that was never synced.
+ * Ranked by relevance. Dates (`since`/`until`) are applied to the results.
+ */
+export const liveSearch = async (req, res) => {
+  try {
+    const scope = await loadScope(req);
+    if (!scope || scope.accountEmails.length === 0) return res.json({ success: true, data: { emails: [], total: 0, source: 'outlook' } });
+    const kql = buildKql({ q: req.query.q, from: req.query.from, to: req.query.to, subject: req.query.subject, hasAttachments: truthy(req.query.has_attachments) });
+    if (!kql) return res.status(400).json({ success: false, error: 'Give at least one of q, from, to, subject or has_attachments.' });
+    const limit = clampLimit(req.query.limit);
+    const emails = req.query.email && scope.accountEmails.includes(req.query.email) ? [req.query.email] : scope.accountEmails;
+    const since = req.query.since ? new Date(req.query.since) : null;
+    const until = req.query.until ? new Date(`${String(req.query.until).slice(0, 10)}T23:59:59.999Z`) : null;
+
+    const perAccount = await Promise.all(emails.map(async (email) => {
+      const token = await getToken(scope.user.worxstreamUserId, email, 'outlook');
+      if (!token) return { email, error: 'connection expired' };
+      try {
+        return { email, rows: await searchMessagesLive(token, kql, { top: limit }) };
+      } catch (error) {
+        return { email, error: error?.response?.status === 401 ? 'connection expired' : 'search failed' };
+      }
+    }));
+
+    let rows = perAccount.flatMap((r) => (r.rows || []).map((m) => ({ ...m, email: r.email })));
+    if (since && !Number.isNaN(since.getTime())) rows = rows.filter((m) => new Date(m.timestamp) >= since);
+    if (until && !Number.isNaN(until.getTime())) rows = rows.filter((m) => new Date(m.timestamp) <= until);
+    rows.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    rows = rows.slice(0, limit);
+
+    // Messages we also hold get their short ref, so the other tools can read them.
+    const stored = await Email.find({ userId: scope.user._id, id: { $in: rows.map((m) => m.id) } }, { _id: 1, id: 1 }).lean();
+    const refOf = new Map(stored.map((d) => [d.id, String(d._id)]));
+    const emailsOut = rows.map((m) => ({
+      ...(refOf.has(m.id) ? { ref: refOf.get(m.id) } : {}),
+      id: m.id,
+      email: m.email,
+      folder: m.folder,
+      from: m.from,
+      to: m.to,
+      subject: m.subject,
+      timestamp: m.timestamp,
+      read: m.read,
+      important: m.important,
+      flagged: m.flagged,
+      conversationId: m.conversationId,
+      hasAttachments: m.hasAttachments,
+      preview: String(m.preview || '').slice(0, 200),
+    }));
+    const failed = perAccount.filter((r) => r.error).map((r) => ({ email: r.email, error: r.error }));
+    res.json({ success: true, data: { emails: emailsOut, total: emailsOut.length, source: 'outlook', query: kql, ...(failed.length ? { accountsNotSearched: failed } : {}) } });
+  } catch (error) {
+    console.error('Error in live search:', error?.response?.status || error.message);
+    res.status(500).json({ success: false, error: 'Failed to search the mailbox' });
+  }
+};
+
+/** How fresh the stored copy of each account is: last sync, what is stored, the running job, push and delta state. */
+export const syncStatus = async (req, res) => {
+  try {
+    const scope = await loadScope(req);
+    if (!scope || scope.accountEmails.length === 0) return res.json({ success: true, data: [] });
+    const accounts = await EmailAccount.find({ userId: scope.user._id }).lean();
+    const data = await Promise.all(accounts.map(async (a) => {
+      const [stats, job, folders] = await Promise.all([
+        Email.aggregate([
+          { $match: { userId: scope.user._id, email: a.email } },
+          { $group: { _id: null, count: { $sum: 1 }, oldest: { $min: '$timestamp' }, newest: { $max: '$timestamp' }, analysed: { $sum: { $cond: ['$isProcessed', 1, 0] } } } },
+        ]),
+        SyncJob.findOne({ worxstreamUserId: scope.user.worxstreamUserId, email: a.email }).lean(),
+        SyncState.countDocuments({ email: a.email }),
+      ]);
+      const s = stats[0] || { count: 0, oldest: null, newest: null, analysed: 0 };
+      return {
+        email: a.email,
+        connectionExpired: Boolean(a.isExpired),
+        stored: { messages: s.count, oldest: s.oldest, newest: s.newest, analysedByAI: s.analysed },
+        lastSyncAt: a.lastSyncAt || null,
+        syncedFrom: a.syncFrom || null,
+        foldersWithDeltaState: folders,
+        push: { active: Boolean(a.graphSubscriptionId && a.graphSubscriptionExpiresAt > new Date()), expiresAt: a.graphSubscriptionExpiresAt || null, watches: a.graphSubscriptionResource || null },
+        lastJob: job ? { kind: job.kind || 'sync', status: job.status, startedAt: job.startedAt, finishedAt: job.finishedAt, summary: job.summary || null, error: job.error || '' } : null,
+      };
+    }));
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Error reading sync status:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to read the sync status' });
+  }
+};
 
 /** Names, types and sizes of a message's attachments (no file contents). */
 export const listAttachments = async (req, res) => {
   try {
     const scope = await loadScope(req);
     if (!scope) return res.status(404).json({ success: false, error: 'User not found' });
-    const query = { userId: scope.user._id, email: { $in: scope.accountEmails }, id: req.params.id };
-    if (req.query.email && scope.accountEmails.includes(req.query.email)) query.email = req.query.email;
-    const doc = await Email.findOne(query).lean();
-    if (!doc) return res.status(404).json({ success: false, error: 'Email not found' });
+    const doc = await findOwnedEmail(scope, req.params.id, req.query.email);
+    if (!doc) return res.status(404).json({ success: false, error: 'Email not found. Use the ref (or id) exactly as search_mail returned it.' });
     const token = await getToken(scope.user.worxstreamUserId, doc.email, 'outlook');
     if (!token) return res.status(409).json({ success: false, error: 'The mailbox connection has expired. Reconnect it in Mail settings.' });
     const attachments = (await listAttachmentMeta(token, doc.id)).filter((a) => !a.inline);

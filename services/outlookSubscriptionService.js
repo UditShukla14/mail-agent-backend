@@ -7,6 +7,7 @@ import { getToken } from '../utils/tokenManager.js';
 import { debug } from '../utils/logger.js';
 
 const GRAPH_SUBSCRIPTIONS_URL = 'https://graph.microsoft.com/v1.0/subscriptions';
+const SUBSCRIPTION_RESOURCE = '/me/messages';
 // Mail subscriptions max ~4230 minutes; keep a small buffer
 const SUBSCRIPTION_LIFETIME_MS = 4200 * 60 * 1000;
 
@@ -102,10 +103,11 @@ export async function createMailSubscription(worxstreamUserId, email, accessToke
   const expirationDateTime = buildExpirationDateTime();
 
   const payload = {
-    changeType: 'created',
+    // Every folder, and edits and deletions as well as new mail, so Mongo follows Outlook (see messageChanges.js)
+    changeType: 'created,updated,deleted',
     notificationUrl,
     lifecycleNotificationUrl: notificationUrl,
-    resource: "/me/mailFolders('inbox')/messages",
+    resource: SUBSCRIPTION_RESOURCE,
     expirationDateTime,
     clientState: getClientState()
   };
@@ -122,6 +124,7 @@ export async function createMailSubscription(worxstreamUserId, email, accessToke
   account.graphSubscriptionId = res.data.id;
   account.graphSubscriptionExpiresAt = new Date(res.data.expirationDateTime);
   account.outlookInboxFolderId = inboxFolderId;
+  account.graphSubscriptionResource = SUBSCRIPTION_RESOURCE;
   account.worxstreamUserId = numericUserId;
   account.provider = 'outlook';
   account.isActive = true;
@@ -336,8 +339,9 @@ export async function ensureSubscriptionForAccount(worxstreamUserId, email) {
     const account = await EmailAccount.findOne({ userId: user._id, email: mail });
     if (account?.isExpired) return; // the owner has to reconnect first
     const expires = account?.graphSubscriptionExpiresAt?.getTime() || 0;
-    if (account?.graphSubscriptionId && expires > Date.now() + RENEW_WHEN_LEFT_MS) return; // healthy
-    if (account?.graphSubscriptionId && expires > Date.now()) {
+    const current = account?.graphSubscriptionResource === SUBSCRIPTION_RESOURCE;
+    if (current && account?.graphSubscriptionId && expires > Date.now() + RENEW_WHEN_LEFT_MS) return; // healthy
+    if (current && account?.graphSubscriptionId && expires > Date.now()) {
       try {
         await renewSubscription(userId, mail, account.graphSubscriptionId);
         return;
