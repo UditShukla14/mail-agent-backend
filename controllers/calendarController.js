@@ -8,7 +8,8 @@ import { getToken } from '../utils/tokenManager.js';
 const getEventCategory = (event) => {
   // You can implement custom logic here to categorize events
   // For now, we'll use a simple approach based on title/keywords
-  const title = event.title.toLowerCase();
+  if (event.isHoliday) return 'Holiday';
+  const title = (event.title || '').toLowerCase();
   
   if (title.includes('meeting') || title.includes('call') || title.includes('conference')) {
     return 'Meeting';
@@ -37,6 +38,7 @@ const getEventColor = (event) => {
     'Personal': '#f59e0b',   // Amber
     'Travel': '#8b5cf6',     // Purple
     'Important': '#ef4444',  // Red
+    'Holiday': '#16a34a',    // Green
     'Other': '#6b7280'       // Gray
   };
   
@@ -353,6 +355,7 @@ export const getStoredCalendarEvents = async (req, res) => {
 export const syncCalendarEvents = async (req, res) => {
   try {
     const { email, startDate, endDate } = req.query;
+    const provider = req.query.provider === 'gmail' ? 'gmail' : 'outlook';
     const { user } = req;
 
     if (!email) {
@@ -397,9 +400,9 @@ export const syncCalendarEvents = async (req, res) => {
 
     // Get the access token using the same pattern as email service
     try {
-      logger.info(`🔍 Getting access token for user ${user.id}, email ${email}, provider outlook`);
+      logger.info(`🔍 Getting access token for user ${user.id}, email ${email}, provider ${provider}`);
       
-      const accessToken = await getToken(user.id, email, 'outlook');
+      const accessToken = await getToken(user.id, email, provider);
       
       if (!accessToken) {
         return res.status(400).json({
@@ -415,7 +418,7 @@ export const syncCalendarEvents = async (req, res) => {
       const events = await calendarService.getCalendarEvents(
         email, 
         accessToken, 
-        'outlook', 
+        provider, 
         user.id,
         start, 
         end
@@ -423,10 +426,22 @@ export const syncCalendarEvents = async (req, res) => {
 
       logger.info(`✅ Successfully synced ${events.length} calendar events for ${email}`);
 
+      const data = events.map(event => ({
+        ...event,
+        id: event.eventId,
+        start: event.startTime,
+        end: event.endTime,
+        allDay: event.isAllDay,
+        accountEmail: email,
+        accountProvider: provider,
+        category: getEventCategory(event),
+        color: getEventColor(event)
+      }));
+
       res.json({
         success: true,
-        data: events,
-        message: `Synced ${events.length} calendar events from Outlook`
+        data,
+        message: `Synced ${events.length} calendar events from ${provider}`
       });
 
     } catch (error) {

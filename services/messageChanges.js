@@ -11,6 +11,7 @@
  */
 
 import Email from '../models/email.js';
+import { cleanPreview } from '../utils/previewText.js';
 
 /**
  * @param {object} args
@@ -36,7 +37,7 @@ export async function applyMessageChange({ account, changeType, messageId, deps 
           id: full.id, userId: account.userId, email, folder,
           from: full.from || '', to: full.to || '', cc: full.cc || '', bcc: full.bcc || '',
           subject: full.subject || '(No Subject)', content: full.content || '',
-          preview: (full.content || '').replace(/<[^>]+>/g, '').slice(0, 200),
+          preview: cleanPreview((full.content || '').replace(/<[^>]+>/g, '')).slice(0, 200),
           timestamp: full.timestamp ? new Date(full.timestamp) : new Date(),
           read: Boolean(full.read), important: Boolean(full.important), flagged: Boolean(full.flagged),
           conversationId: full.conversationId || '', hasAttachments: Boolean(full.hasAttachments),

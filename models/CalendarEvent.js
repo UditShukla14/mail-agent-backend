@@ -71,6 +71,16 @@ const calendarEventSchema = new mongoose.Schema({
     enum: ['outlook', 'gmail'],
     required: true
   },
+  startTimeZone: String,
+  endTimeZone: String,
+  calendarName: {
+    type: String,
+    default: ''
+  },
+  isHoliday: {
+    type: Boolean,
+    default: false
+  },
   worxstreamUserId: {
     type: Number,
     required: true,

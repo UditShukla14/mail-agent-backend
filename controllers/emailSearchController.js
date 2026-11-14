@@ -2,6 +2,7 @@ import Email from '../models/email.js';
 import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
 import { getToken } from '../utils/tokenManager.js';
+import { cleanPreview } from '../utils/previewText.js';
 import { getMessageById, listAllFolders, listAttachmentMeta, getConversationLive, getMessageUniqueText, buildKql, searchMessagesLive, wellKnownFolderIds } from '../services/outlookService.js';
 import SyncJob from '../models/SyncJob.js';
 import SyncState from '../models/SyncState.js';
@@ -89,7 +90,7 @@ const summarize = (doc) => ({
   flagged: Boolean(doc.flagged),
   conversationId: doc.conversationId || '',
   hasAttachments: Boolean(doc.hasAttachments),
-  preview: String(doc.preview || '').slice(0, 200),
+  preview: cleanPreview(String(doc.preview || '')).slice(0, 200),
   aiMeta: doc.aiMeta
     ? {
         summary: doc.aiMeta.summary || '',

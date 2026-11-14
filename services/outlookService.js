@@ -2,6 +2,7 @@ import { retryTransient, isOutlookUnavailableError } from '../utils/transientRet
 import axios from 'axios';
 import { debug } from '../utils/logger.js';
 import { installGraphDefaults } from './graphDefaults.js';
+import { cleanPreview } from '../utils/previewText.js';
 
 installGraphDefaults(); // immutable ids on every Graph call (see graphDefaults.js)
 
@@ -550,7 +551,7 @@ export function mapGraphMessage(msg, folderId) {
     cc: (msg.ccRecipients || []).map(addr).join(', '),
     bcc: (msg.bccRecipients || []).map(addr).join(', '),
     subject: msg.subject || '(No Subject)',
-    preview: msg.bodyPreview || '',
+    preview: cleanPreview(msg.bodyPreview || ''),
     ...(msg.body ? { content: msg.body.content || '' } : {}),
     timestamp: msg.receivedDateTime,
     read: Boolean(msg.isRead),
