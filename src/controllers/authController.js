@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import { saveToken, getToken } from '../utils/tokenManager.js';
 import { google } from 'googleapis';
 import { authenticateUser } from '../middleware/auth.js';
-import { createMailSubscription } from '../services/outlookSubscriptionService.js';
+import { createMailSubscription } from '../services/outlook/outlookSubscriptionService.js';
 import { debug } from '../utils/logger.js';
 
 dotenv.config();

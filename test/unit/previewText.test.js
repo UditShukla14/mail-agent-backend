@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanPreview } from '../utils/previewText.js';
+import { cleanPreview } from '../../src/utils/previewText.js';
 
 describe('cleanPreview', () => {
   it('drops "View in Browser" in its usual wordings', () => {

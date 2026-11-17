@@ -1,6 +1,6 @@
 import emailEnrichmentService from './emailEnrichment.js';
-import Email from '../models/email.js';
-import { debug } from '../utils/logger.js';
+import Email from '../../models/email.js';
+import { debug } from '../../utils/logger.js';
 
 // Configuration
 const CONFIG = {

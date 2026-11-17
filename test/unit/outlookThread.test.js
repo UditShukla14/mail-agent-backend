@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { shapeThreadMessage } from '../services/outlookService.js';
+import { shapeThreadMessage } from '../../src/services/outlook/outlookService.js';
 
 describe('shapeThreadMessage', () => {
   it('maps a Graph message and uses uniqueBody (the new text only) as its text', () => {

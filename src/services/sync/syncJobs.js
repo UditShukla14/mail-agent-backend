@@ -4,16 +4,16 @@
  * opened later (or after a refresh) can ask for it.
  */
 
-import SyncJob from '../models/SyncJob.js';
-import User from '../models/User.js';
-import { getToken, refreshSpecificToken } from '../utils/tokenManager.js';
-import { withTokenRefresh, isOutlookAuthError, OUTLOOK_AUTH_MESSAGE } from '../utils/outlookAuthRetry.js';
-import { listAllFolders, deltaFolderMessages, listFolderMessagesRange } from './outlookService.js';
+import SyncJob from '../../models/SyncJob.js';
+import User from '../../models/User.js';
+import { getToken, refreshSpecificToken } from '../../utils/tokenManager.js';
+import { withTokenRefresh, isOutlookAuthError, OUTLOOK_AUTH_MESSAGE } from '../../utils/outlookAuthRetry.js';
+import { listAllFolders, deltaFolderMessages, listFolderMessagesRange } from '../outlook/outlookService.js';
 import { runAccountSync } from './accountSync.js';
 import { runCleanResync } from './cleanResync.js';
-import SyncState from '../models/SyncState.js';
-import EmailAccount from '../models/EmailAccount.js';
-import notificationService from './notificationService.js';
+import SyncState from '../../models/SyncState.js';
+import EmailAccount from '../../models/EmailAccount.js';
+import notificationService from '../notificationService.js';
 
 const running = new Map(); // `${userId}:${email}` -> true while this process is working on it
 const keyOf = (userId, email) => `${userId}:${String(email).toLowerCase()}`;

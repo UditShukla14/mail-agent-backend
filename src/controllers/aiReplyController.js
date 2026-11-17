@@ -1,4 +1,4 @@
-import { AIReplyService } from '../services/aiReplyService.js';
+import { AIReplyService } from '../services/ai/aiReplyService.js';
 
 export const generateReply = async (req, res) => {
   try {

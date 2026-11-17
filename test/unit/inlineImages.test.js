@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { embedInlineImages } from '../utils/inlineImages.js';
+import { embedInlineImages } from '../../src/utils/inlineImages.js';
 
 test('cid references become inline image data', () => {
   const html = '<p>Hi</p><img src="cid:logo@1"><img src="cid:logo@1">';

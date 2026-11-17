@@ -3,7 +3,7 @@ import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
 import { getToken } from '../utils/tokenManager.js';
 import { cleanPreview } from '../utils/previewText.js';
-import { getMessageById, listAllFolders, listAttachmentMeta, getConversationLive, getMessageUniqueText, buildKql, searchMessagesLive, wellKnownFolderIds } from '../services/outlookService.js';
+import { getMessageById, listAllFolders, listAttachmentMeta, getConversationLive, getMessageUniqueText, buildKql, searchMessagesLive, wellKnownFolderIds } from '../services/outlook/outlookService.js';
 import SyncJob from '../models/SyncJob.js';
 import SyncState from '../models/SyncState.js';
 

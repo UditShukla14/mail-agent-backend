@@ -1,7 +1,7 @@
 // services/claudeApiService.js
 import { RateLimiter } from 'limiter';
-import { ANTHROPIC_MODEL } from '../utils/anthropicConfig.js';
-import { debug } from '../utils/logger.js';
+import { ANTHROPIC_MODEL } from '../../config/anthropic.js';
+import { debug } from '../../utils/logger.js';
 
 // Rate limiting configuration
 const RATE_LIMIT = {

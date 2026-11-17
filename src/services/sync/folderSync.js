@@ -3,8 +3,8 @@
  * conversation (grouped by Outlook's own conversationId) with the number of messages in it.
  */
 
-import Email from '../models/email.js';
-import { getFolderThreadIds } from './outlookService.js';
+import Email from '../../models/email.js';
+import { getFolderThreadIds } from '../outlook/outlookService.js';
 
 /** Messages without a conversation id (not synced yet) stand alone, keyed by their own id. */
 const THREAD_KEY = {

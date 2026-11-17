@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchInlineImages } from '../services/outlookService.js';
+import { fetchInlineImages } from '../../src/services/outlook/outlookService.js';
 
 const att = (id, over = {}) => ({ id, isInline: true, size: 1000, ...over });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

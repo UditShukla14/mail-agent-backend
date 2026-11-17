@@ -208,49 +208,6 @@ export const getEmailAnalytics = async (req, res) => {
 
     const enrichedCount = await Email.countDocuments(enrichedMatchCriteria);
 
-    // If no enriched emails, trigger enrichment for all unenriched emails for this email and folder
-    if (enrichedCount === 0) {
-      // Check if user has categories configured before triggering enrichment
-      const activeEmail = targetEmail || userEmails[0];
-      const emailAccount = await EmailAccount.findOne({ userId: user._id, email: activeEmail });
-      
-      if (!emailAccount || !emailAccount.categories || emailAccount.categories.length === 0) {
-        debug('⏸️ Skipping automatic enrichment - no categories configured for user');
-      } else {
-        const unenrichedMatchCriteria = { 
-          userId: user._id,
-          $or: [
-            { 'aiMeta.enrichedAt': { $exists: false } },
-            { 'aiMeta.enrichedAt': null }
-          ]
-        };
-        
-        // Add email filter only if targetEmail is specified
-        if (targetEmail) {
-          unenrichedMatchCriteria.email = targetEmail;
-        } else {
-          unenrichedMatchCriteria.email = { $in: userEmails };
-        }
-        
-        if (folderId) {
-          unenrichedMatchCriteria.folder = folderId;
-        }
-
-        const unenrichedEmails = await Email.find(unenrichedMatchCriteria);
-
-        if (unenrichedEmails.length > 0) {
-          try {
-            debug(`🚀 Auto-triggering enrichment for ${unenrichedEmails.length} emails (${emailAccount.categories.length} categories available)`);
-            // Use the queue service instead of direct enrichment to prevent infinite loops
-            const enrichmentQueueService = await import('../services/enrichmentQueueService.js');
-            await enrichmentQueueService.default.addToQueue(unenrichedEmails);
-          } catch (enrichmentError) {
-            // Silently handle enrichment queue errors
-          }
-        }
-      }
-    }
-
     // Get volume over time (last 30 days) for this specific email and folder
     const volumeOverTime = await Email.aggregate([
       { 

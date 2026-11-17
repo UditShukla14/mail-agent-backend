@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSearchQuery, clampLimit, toPlainText, latestMessageText } from '../controllers/emailSearchController.js';
+import { buildSearchQuery, clampLimit, toPlainText, latestMessageText } from '../../src/controllers/emailSearchController.js';
 
 const base = { userId: 'u1', accountEmails: ['a@x.com', 'b@x.com'] };
 

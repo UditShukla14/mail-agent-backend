@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
 import http from 'node:http';
-import { mergePrefer, installGraphDefaults } from '../services/graphDefaults.js';
+import { mergePrefer, installGraphDefaults } from '../../src/services/outlook/graphDefaults.js';
 
 describe('mergePrefer', () => {
   it('adds a preference without losing the ones already asked for', () => {

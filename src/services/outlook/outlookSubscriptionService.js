@@ -1,10 +1,10 @@
 import axios from 'axios';
 import { timingSafeEqual } from 'crypto';
-import EmailAccount from '../models/EmailAccount.js';
-import User from '../models/User.js';
-import Token from '../models/Token.js';
-import { getToken } from '../utils/tokenManager.js';
-import { debug } from '../utils/logger.js';
+import EmailAccount from '../../models/EmailAccount.js';
+import User from '../../models/User.js';
+import Token from '../../models/Token.js';
+import { getToken } from '../../utils/tokenManager.js';
+import { debug } from '../../utils/logger.js';
 
 const GRAPH_SUBSCRIPTIONS_URL = 'https://graph.microsoft.com/v1.0/subscriptions';
 const SUBSCRIPTION_RESOURCE = '/me/messages';

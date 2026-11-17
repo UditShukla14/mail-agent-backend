@@ -2,9 +2,9 @@ import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 process.env.NODE_ENV = 'production';
-const { worxstreamApi } = await import('../services/worxstreamApi.js');
-const { authenticateUser } = await import('../middleware/auth.js');
-const { __clearAuthCacheForTests, classifyFailure } = await import('../utils/authVerify.js');
+const { worxstreamApi } = await import('../../src/services/worxstreamApi.js');
+const { authenticateUser } = await import('../../src/middleware/auth.js');
+const { __clearAuthCacheForTests, classifyFailure } = await import('../../src/utils/authVerify.js');
 
 const makeRes = () => {
   const res = { statusCode: 200, body: null };
@@ -77,14 +77,14 @@ describe('classifyFailure', () => {
 describe('extractUserFromUserInfo', () => {
   let extract;
   it('accepts every /api/user-info shape the Sign and Chat servers accept', async () => {
-    ({ extractUserFromUserInfo: extract } = await import('../services/worxstreamApi.js'));
+    ({ extractUserFromUserInfo: extract } = await import('../../src/services/worxstreamApi.js'));
     assert.equal(extract({ success: true, data: { user: { id: 7 } } }).id, 7);
     assert.equal(extract({ success: true, user: { id: 8 } }).id, 8);
     assert.equal(extract({ id: 9, email: 'a@b.c' }).id, 9);
     assert.equal(extract({ data: { id: 10, email: 'a@b.c' } }).id, 10);
   });
   it('rejects bodies without a user id', async () => {
-    const { extractUserFromUserInfo } = await import('../services/worxstreamApi.js');
+    const { extractUserFromUserInfo } = await import('../../src/services/worxstreamApi.js');
     assert.equal(extractUserFromUserInfo(null), null);
     assert.equal(extractUserFromUserInfo('<html>login</html>'), null);
     assert.equal(extractUserFromUserInfo({ success: true, data: { user: {} } }), null);

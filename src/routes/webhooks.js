@@ -1,5 +1,5 @@
 import express from 'express';
-import { processOutlookNotifications } from '../services/outlookWebhookProcessor.js';
+import { processOutlookNotifications } from '../services/outlook/outlookWebhookProcessor.js';
 import { debug } from '../utils/logger.js';
 
 const router = express.Router();

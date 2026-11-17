@@ -10,8 +10,8 @@
  * Outlook access and notifications are injected so this can be tested without Outlook.
  */
 
-import Email from '../models/email.js';
-import { cleanPreview } from '../utils/previewText.js';
+import Email from '../../models/email.js';
+import { cleanPreview } from '../../utils/previewText.js';
 
 /**
  * @param {object} args

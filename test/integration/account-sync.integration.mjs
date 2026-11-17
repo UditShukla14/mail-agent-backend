@@ -10,9 +10,9 @@ const imp = (rel) => import(pathToFileURL(`${ROOT}/${rel}`).href);
 const mongod = await MongoMemoryServer.create();
 const mongoose = (await imp('node_modules/mongoose/index.js')).default;
 await mongoose.connect(mongod.getUri('mail_test'));
-const Email = (await imp('models/email.js')).default;
-const { runAccountSync } = await imp('services/accountSync.js');
-const { runCleanResync } = await imp('services/cleanResync.js');
+const Email = (await imp('src/models/email.js')).default;
+const { runAccountSync } = await imp('src/services/sync/accountSync.js');
+const { runCleanResync } = await imp('src/services/sync/cleanResync.js');
 await Email.init();
 
 const user = { _id: new mongoose.Types.ObjectId() };

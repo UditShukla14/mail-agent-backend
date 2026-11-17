@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildKql, mapGraphMessage } from '../services/outlookService.js';
-import { parseRange } from '../services/syncJobs.js';
+import { buildKql, mapGraphMessage } from '../../src/services/outlook/outlookService.js';
+import { parseRange } from '../../src/services/sync/syncJobs.js';
 
 describe('buildKql', () => {
   it('builds a $search string from separate parts', () => {

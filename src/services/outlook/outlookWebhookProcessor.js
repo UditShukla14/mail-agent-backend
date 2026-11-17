@@ -1,10 +1,10 @@
-import User from '../models/User.js';
-import { getToken } from '../utils/tokenManager.js';
+import User from '../../models/User.js';
+import { getToken } from '../../utils/tokenManager.js';
 import { getMessageById, getMessageMeta } from './outlookService.js';
-import enrichmentQueueService from './enrichmentQueueService.js';
-import notificationService from './notificationService.js';
+import enrichmentQueueService from '../ai/enrichmentQueueService.js';
+import notificationService from '../notificationService.js';
 import { applyMessageChange } from './messageChanges.js';
-import { debug } from '../utils/logger.js';
+import { debug } from '../../utils/logger.js';
 import {
   findAccountBySubscriptionId,
   verifyClientState,

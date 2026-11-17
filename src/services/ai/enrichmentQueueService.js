@@ -1,18 +1,13 @@
 import { processEnrichmentBatch } from './enrichmentProcessor.js';
-import Email from '../models/email.js';
+import Email from '../../models/email.js';
 import emailEnrichmentService from './emailEnrichment.js';
-import User from '../models/User.js';
-import { debug } from '../utils/logger.js';
+import User from '../../models/User.js';
+import { debug } from '../../utils/logger.js';
 
 class EnrichmentQueueService {
   constructor() {
     this.queue = [];
     this.processing = false;
-    this.batchSize = 5; // Consistent with other services
-    this.rateLimitDelay = 60000; // 1 minute delay between batches
-    this.maxRetries = 3;
-    this.currentTokens = 0;
-    this.maxTokensPerMinute = 1000; // Assuming a default maxTokensPerMinute
     this.processingEmails = new Set(); // Track emails currently being processed
   }
 
@@ -120,11 +115,6 @@ class EnrichmentQueueService {
         // Clear processing state for this batch
         queueItem.emails.forEach(email => this.processingEmails.delete(email.id));
         
-        // Add delay between batches if there are more emails
-        if (this.queue.length > 0) {
-          debug(`⏳ Waiting ${this.rateLimitDelay/1000} seconds before next batch`);
-          await new Promise(resolve => setTimeout(resolve, this.rateLimitDelay));
-        }
       }
       debug('✅ Queue processing completed');
     } catch (error) {
@@ -230,36 +220,6 @@ class EnrichmentQueueService {
 
   isProcessing() {
     return this.processing;
-  }
-
-  // Method to force re-enrichment of specific emails
-  async forceReenrich(emailIds) {
-    const emails = await Email.find({ id: { $in: emailIds } });
-    if (emails.length === 0) {
-      debug('❌ No emails found for re-enrichment');
-      return;
-    }
-    
-    // Clear existing enrichment data
-    await Email.updateMany(
-      { id: { $in: emailIds } },
-      { 
-        $unset: { 
-          'aiMeta': 1 
-        },
-        $set: {
-          isProcessed: false
-        }
-      }
-    );
-    
-    await this.addToQueue(emails);
-  }
-
-  // Method to clear processing state (useful for debugging)
-  clearProcessingState() {
-    this.processingEmails.clear();
-    debug('🧹 Processing state cleared');
   }
 }
 

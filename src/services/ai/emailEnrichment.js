@@ -1,9 +1,9 @@
-import Email from '../models/email.js';
-import emailService from './emailService.js';
-import User from '../models/User.js';
-import EmailAccount from '../models/EmailAccount.js';
+import Email from '../../models/email.js';
+import emailService from '../emailService.js';
+import User from '../../models/User.js';
+import EmailAccount from '../../models/EmailAccount.js';
 import { makeClaudeApiCall } from './claudeApiService.js';
-import { debug } from '../utils/logger.js';
+import { debug } from '../../utils/logger.js';
 
 class EmailEnrichmentService {
   constructor() {
@@ -267,188 +267,6 @@ class EmailEnrichmentService {
     }
   }
 
-  async enrichBatch(emails, socket) {
-    try {
-      debug(`🔄 Starting batch enrichment for ${emails.length} emails`);
-
-      // Get the worxstreamUserId from the first email's user
-      const firstEmail = emails[0];
-      if (!firstEmail || !firstEmail.userId) {
-        throw new Error('Invalid email batch - missing user information');
-      }
-
-      const user = await User.findById(firstEmail.userId);
-      if (!user) {
-        throw new Error('User not found');
-      }
-
-      // Find the socket for this user
-      const userSocket = this.findUserSocket(user.worxstreamUserId);
-
-      // Filter out already enriched emails and validate required fields
-      const unenrichedEmails = [];
-      for (const email of emails) {
-        // Validate email object
-        if (!email || typeof email !== 'object') {
-          console.error('❌ Invalid email object:', email);
-          continue;
-        }
-
-        // Check required fields
-        if (!email.id || !email.email || !email.userId) {
-          console.error('❌ Email missing required fields:', {
-            id: email.id,
-            email: email.email,
-            userId: email.userId
-          });
-          continue;
-        }
-
-        // Check if already enriched - use database check instead of in-memory
-        const existingEmail = await Email.findById(email._id);
-        if (existingEmail?.aiMeta?.enrichedAt && !existingEmail?.aiMeta?.error && existingEmail?.isProcessed) {
-          debug(`✅ Email ${email.id} already enriched`);
-          // Emit already enriched status to specific user
-          if (userSocket) {
-            userSocket.emit('mail:enrichmentStatus', {
-              messageId: email.id,
-              status: 'completed',
-              message: 'Already enriched',
-              aiMeta: existingEmail.aiMeta,
-              email: existingEmail
-            });
-          }
-          continue;
-        }
-
-        // Add to unenriched list
-        unenrichedEmails.push(email);
-      }
-      
-      if (unenrichedEmails.length === 0) {
-        debug('📧 No emails need enrichment');
-        return true;
-      }
-
-      debug(`📧 Found ${unenrichedEmails.length} emails needing enrichment`);
-
-      // Process emails in batches to prevent rate limiting
-      const batchSize = 5; // Back to 5 emails per batch as requested
-      const maxRetries = 3;
-      const baseDelay = 120000; // 2 minutes base delay for API overload protection
-
-      for (let i = 0; i < unenrichedEmails.length; i += batchSize) {
-        const batch = unenrichedEmails.slice(i, i + batchSize);
-        debug(`🔄 Processing batch of ${batch.length} emails`);
-
-        let retryCount = 0;
-        let success = false;
-
-        while (!success && retryCount < maxRetries) {
-          try {
-            // Get full message content for each email in batch
-            const messages = await Promise.all(batch.map(async (email) => {
-              const user = await User.findById(email.userId);
-              if (!user) {
-                throw new Error('User not found');
-              }
-              return emailService.getMessage(user.worxstreamUserId, email.email, email.id);
-            }));
-
-            // Generate batch analysis
-            const analyses = await this.generateBatchAnalysis(messages);
-
-            // Update each email with its analysis
-            await Promise.all(batch.map(async (email, index) => {
-              const analysis = analyses[index];
-              if (analysis) {
-                const updatedEmail = await Email.findByIdAndUpdate(
-                  email._id,
-                  {
-                    aiMeta: {
-                      ...analysis,
-                      enrichedAt: new Date(),
-                      error: null,
-                      version: '1.0'
-                    },
-                    isProcessed: true
-                  },
-                  { new: true }
-                );
-
-                // Emit success status to specific user
-                if (userSocket) {
-                  debug(`📤 Emitting enrichment status for message ${email.id} to socket ${userSocket.id}`);
-                  userSocket.emit('mail:enrichmentStatus', {
-                    messageId: email.id,
-                    status: 'completed',
-                    message: 'Analysis complete',
-                    aiMeta: analysis,
-                    email: updatedEmail
-                  });
-                  debug(`✅ Batch enrichment status emitted successfully for message ${email.id}`);
-                } else {
-                  debug(`❌ No user socket found for message ${email.id}`);
-                }
-              }
-            }));
-
-            success = true;
-            debug(`✅ Successfully processed batch of ${batch.length} emails`);
-
-          } catch (error) {
-            retryCount++;
-            console.error(`❌ Error processing batch (attempt ${retryCount}/${maxRetries}):`, error);
-
-            // Emit error to specific user
-            if (userSocket) {
-              batch.forEach(email => {
-                userSocket.emit('mail:enrichmentStatus', {
-                  messageId: email.id,
-                  status: 'error',
-                  message: `Error processing email (attempt ${retryCount}/${maxRetries}): ${error.message}`,
-                  error: true
-                });
-              });
-            }
-
-            if (retryCount < maxRetries) {
-              const delay = baseDelay * Math.pow(2, retryCount - 1); // Exponential backoff
-              debug(`⏳ Waiting ${delay/1000} seconds before retry ${retryCount}/${maxRetries}...`);
-              await new Promise(resolve => setTimeout(resolve, delay));
-            } else {
-              // Update emails with error status after all retries failed
-              await Promise.all(batch.map(async (email) => {
-                await Email.findByIdAndUpdate(email._id, {
-                  $set: {
-                    'aiMeta.error': `Failed after ${maxRetries} attempts: ${error.message}`,
-                    'aiMeta.enrichedAt': new Date(),
-                    'aiMeta.version': '1.0',
-                    isProcessed: false
-                  }
-                });
-              }));
-            }
-          }
-        }
-
-        // Add delay between batches to prevent rate limiting
-        if (i + batchSize < unenrichedEmails.length) {
-          const delay = 30000; // 30 seconds delay between batches to prevent API overload
-          debug(`⏳ Waiting ${delay/1000} seconds before next batch...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
-
-      return true;
-    } catch (error) {
-      console.error('❌ Error in enrichBatch:', error);
-      if (socket) {
-        socket.emit('mail:error', 'Failed to process email batch');
-      }
-      throw error;
-    }
-  }
 
   async generateAnalysis(message) {
     try {
@@ -671,19 +489,6 @@ Format the response as a JSON object with these fields:
     } catch (error) {
       console.error('❌ Custom analysis call failed:', error);
       throw error;
-    }
-  }
-
-  async generateBatchAnalysis(messages) {
-    try {
-      debug('🔍 generateBatchAnalysis - Processing batch of', messages.length, 'emails');
-      
-      // For batch analysis, we'll need to implement custom logic for each user's categories
-      // For now, fall back to the generic service
-      throw new Error('Custom batch analysis not yet implemented - use single email enrichment');
-    } catch (error) {
-      console.error('❌ AI batch analysis failed:', error);
-      throw new Error('Failed to generate AI batch analysis: ' + error.message);
     }
   }
 }

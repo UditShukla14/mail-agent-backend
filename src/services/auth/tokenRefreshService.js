@@ -1,8 +1,8 @@
-import Token from '../models/Token.js';
-import EmailAccount from '../models/EmailAccount.js';
-import { refreshToken } from '../utils/tokenManager.js';
-import notificationService from './notificationService.js';
-import { debug } from '../utils/logger.js';
+import Token from '../../models/Token.js';
+import EmailAccount from '../../models/EmailAccount.js';
+import { refreshToken } from '../../utils/tokenManager.js';
+import notificationService from '../notificationService.js';
+import { debug } from '../../utils/logger.js';
 
 class TokenRefreshService {
   constructor() {

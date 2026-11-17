@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import calendarService from '../services/calendarService.js';
+import calendarService from '../../src/services/calendarService.js';
 
 test('timed Outlook events are returned as UTC', () => {
   const e = calendarService.transformOutlookEvent({

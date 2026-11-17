@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { withTokenRefresh, isOutlookAuthError, OUTLOOK_AUTH_ERROR } from '../utils/outlookAuthRetry.js';
+import { withTokenRefresh, isOutlookAuthError, OUTLOOK_AUTH_ERROR } from '../../src/utils/outlookAuthRetry.js';
 
 const unauthorized = () => Object.assign(new Error('401'), { response: { status: 401 } });
 

@@ -12,7 +12,7 @@
  * The new copy is built BEFORE anything is deleted, so a run that fails halfway leaves the old data as it was.
  */
 
-import Email from '../models/email.js';
+import Email from '../../models/email.js';
 
 const MAX_IDS_FOR_CLEANUP = 100000;
 const PAGE_PAUSE_MS = 150;

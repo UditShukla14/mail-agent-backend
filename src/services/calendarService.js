@@ -4,7 +4,7 @@ import { logger } from '../utils/logger.js';
 import { retryTransient } from '../utils/transientRetry.js';
 import { withTokenRefresh } from '../utils/outlookAuthRetry.js';
 import { getToken, refreshSpecificToken } from '../utils/tokenManager.js';
-import { installGraphDefaults } from './graphDefaults.js';
+import { installGraphDefaults } from './outlook/graphDefaults.js';
 
 installGraphDefaults();
 

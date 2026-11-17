@@ -1,8 +1,8 @@
-import { retryTransient, isOutlookUnavailableError } from '../utils/transientRetry.js';
+import { retryTransient, isOutlookUnavailableError } from '../../utils/transientRetry.js';
 import axios from 'axios';
-import { debug } from '../utils/logger.js';
+import { debug } from '../../utils/logger.js';
 import { installGraphDefaults } from './graphDefaults.js';
-import { cleanPreview } from '../utils/previewText.js';
+import { cleanPreview } from '../../utils/previewText.js';
 
 installGraphDefaults(); // immutable ids on every Graph call (see graphDefaults.js)
 

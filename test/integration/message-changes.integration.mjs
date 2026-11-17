@@ -9,8 +9,8 @@ const imp = (rel) => import(pathToFileURL(`${ROOT}/${rel}`).href);
 const mongod = await MongoMemoryServer.create();
 const mongoose = (await imp('node_modules/mongoose/index.js')).default;
 await mongoose.connect(mongod.getUri('mail_test'));
-const Email = (await imp('models/email.js')).default;
-const { applyMessageChange } = await imp('services/messageChanges.js');
+const Email = (await imp('src/models/email.js')).default;
+const { applyMessageChange } = await imp('src/services/outlook/messageChanges.js');
 await Email.init();
 
 const account = { _id: new mongoose.Types.ObjectId(), userId: new mongoose.Types.ObjectId(), email: 'me@x.com', worxstreamUserId: 16, outlookInboxFolderId: 'inbox-id' };

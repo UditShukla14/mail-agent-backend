@@ -13,7 +13,7 @@ import {
   markMessageRead,
   markMessageImportant,
   deleteMessage
-} from '../services/outlookService.js';
+} from '../services/outlook/outlookService.js';
 
 import { getToken, getUserTokens, refreshSpecificToken } from '../utils/tokenManager.js';
 import { withTokenRefresh, isOutlookAuthError, OUTLOOK_AUTH_MESSAGE } from '../utils/outlookAuthRetry.js';
@@ -24,13 +24,13 @@ const outlookFailureMessage = (error, generic) =>
   isOutlookAuthError(error) ? OUTLOOK_AUTH_MESSAGE : isOutlookUnavailableError(error) ? OUTLOOK_UNAVAILABLE_MESSAGE : generic;
 import User from '../models/User.js';
 import Email from '../models/email.js';
-import emailEnrichmentService from '../services/emailEnrichment.js';
-import enrichmentQueueService from '../services/enrichmentQueueService.js';
+import emailEnrichmentService from '../services/ai/emailEnrichment.js';
+import { processEnrichmentBatch } from '../services/ai/enrichmentProcessor.js';
 import axios from 'axios';
 import emailService from '../services/emailService.js';
-import { saveOutlookMessages, getFolderThreads, syncConversationIds } from '../services/folderSync.js';
-import { startAccountSync, getSyncStatus } from '../services/syncJobs.js';
-import { ensureSubscriptionForAccount } from '../services/outlookSubscriptionService.js';
+import { saveOutlookMessages, getFolderThreads, syncConversationIds } from '../services/sync/folderSync.js';
+import { startAccountSync, getSyncStatus } from '../services/sync/syncJobs.js';
+import { ensureSubscriptionForAccount } from '../services/outlook/outlookSubscriptionService.js';
 import { debug } from '../utils/logger.js';
 
 // Inline images already fetched, so reopening a message shows its pictures at once (small, per process).
@@ -164,50 +164,42 @@ export const initMailSocket = (socket, io) => {
   });
 
 
-  // New handler for enriching specific emails
+  // On-demand AI analysis (the "AI" button on a message). New Inbox mail is analysed automatically when it arrives
+  // (outlookWebhookProcessor); older mail is only analysed when the user asks, so tokens are never spent on mail
+  // nobody opens. Runs straight away (not behind the arrival queue) and only for the caller's own account.
+  const MAX_ON_DEMAND = 10;
   onAuthed('mail:enrichEmails', async ({ worxstreamUserId, email, messageIds, forceReanalyze = false }) => {
     try {
-      debug('🔍 Enrichment request received:', { 
-        worxstreamUserId, 
-        email, 
-        messageIds: messageIds.length, 
-        forceReanalyze 
-      });
-      
-      // Get the messages that need enrichment
-      const messages = await Email.find({ id: { $in: messageIds } });
-      
-      
-      if (messages.length === 0) {
-        return;
-      }
+      const ids = (Array.isArray(messageIds) ? messageIds : [messageIds]).filter(Boolean).slice(0, MAX_ON_DEMAND);
+      if (!email || ids.length === 0) return;
 
-      let messagesNeedingEnrichment;
-      
+      const user = await User.findOne({ worxstreamUserId });
+      if (!user) return socket.emit('mail:error', 'User not found');
+
+      const messages = await Email.find({ id: { $in: ids }, email, userId: user._id });
+      // Not stored (or not this user's): answer, so the UI does not wait forever.
+      const found = new Set(messages.map((m) => m.id));
+      for (const id of ids.filter((i) => !found.has(i))) {
+        socket.emit('mail:enrichmentStatus', { messageId: id, status: 'error', message: 'Message not found', error: true });
+      }
+      const targets = forceReanalyze ? messages : messages.filter((msg) => !msg.aiMeta?.enrichedAt || msg.aiMeta?.error);
+      const done = messages.filter((msg) => !targets.includes(msg));
+
+      // Already analysed: just hand the stored result back so the UI can show it.
+      for (const msg of done) {
+        socket.emit('mail:enrichmentStatus', {
+          messageId: msg.id, status: 'completed', message: 'Already analysed', aiMeta: msg.aiMeta, email: msg,
+        });
+      }
+      if (targets.length === 0) return;
+
       if (forceReanalyze) {
-        // Force re-enrichment: process all messages regardless of current AI metadata
-        messagesNeedingEnrichment = messages;
-        
-        // Clear existing AI metadata for force re-enrichment
         await Email.updateMany(
-          { id: { $in: messageIds } },
-          { 
-            $unset: { aiMeta: 1 },
-            $set: { isProcessed: false, updatedAt: new Date() }
-          }
+          { _id: { $in: targets.map((m) => m._id) } },
+          { $unset: { aiMeta: 1 }, $set: { isProcessed: false, updatedAt: new Date() } },
         );
-      } else {
-        // Normal enrichment: only process messages without AI metadata
-        messagesNeedingEnrichment = messages.filter(msg => !msg.aiMeta?.enrichedAt);
       }
-      
-      if (messagesNeedingEnrichment.length > 0) {
-        // Pass the socket instance directly to the enrichment queue service
-        // This ensures we use the same socket that made the request
-        await enrichmentQueueService.addToQueue(messagesNeedingEnrichment, socket);
-        
-      } else {
-      }
+      await processEnrichmentBatch(targets, (event, data) => socket.emit(event, data));
     } catch (error) {
       console.error('❌ Error in mail:enrichEmails:', error);
       socket.emit('mail:error', 'Failed to start enrichment process');
@@ -498,7 +490,7 @@ export const initMailSocket = (socket, io) => {
       const token = await getToken(worxstreamUserId, email, 'outlook');
       if (!token) return socket.emit('mail:error', 'Token not found');
 
-      const { getAttachmentsByMessageId } = await import('../services/outlookService.js');
+      const { getAttachmentsByMessageId } = await import('../services/outlook/outlookService.js');
       const attachments = await getAttachmentsByMessageId(token, messageId);
 
       socket.emit('mail:attachments', { messageId, attachments });

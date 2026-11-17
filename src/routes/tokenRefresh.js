@@ -1,6 +1,6 @@
 import express from 'express';
 import { authenticateUser } from '../middleware/auth.js';
-import tokenRefreshService from '../services/tokenRefreshService.js';
+import tokenRefreshService from '../services/auth/tokenRefreshService.js';
 import { refreshSpecificToken, getUserTokens } from '../utils/tokenManager.js';
 import { debug } from '../utils/logger.js';
 

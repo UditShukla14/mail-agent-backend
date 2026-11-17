@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import dotenv from 'dotenv';
-import { ANTHROPIC_MODEL } from '../utils/anthropicConfig.js';
+import { ANTHROPIC_MODEL } from '../../config/anthropic.js';
 
 dotenv.config();
 

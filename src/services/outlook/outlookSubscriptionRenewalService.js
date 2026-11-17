@@ -2,7 +2,7 @@ import {
   renewExpiringSubscriptions,
   backfillMissingSubscriptions
 } from './outlookSubscriptionService.js';
-import { debug } from '../utils/logger.js';
+import { debug } from '../../utils/logger.js';
 
 class OutlookSubscriptionRenewalService {
   constructor() {

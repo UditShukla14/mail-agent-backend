@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { retryTransient, isTransientError, OUTLOOK_UNAVAILABLE_ERROR } from '../utils/transientRetry.js';
+import { retryTransient, isTransientError, OUTLOOK_UNAVAILABLE_ERROR } from '../../src/utils/transientRetry.js';
 
 const http = (status, headers) => Object.assign(new Error(String(status)), { response: { status, headers } });
 const noSleep = async () => {};

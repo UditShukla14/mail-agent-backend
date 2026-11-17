@@ -11,8 +11,8 @@ const mongod = await MongoMemoryServer.create();
 const mongoose = (await imp('node_modules/mongoose/index.js')).default;
 await mongoose.connect(mongod.getUri('mail_test'));
 
-const Email = (await imp('models/email.js')).default;
-const { saveOutlookMessages, getFolderThreads, syncConversationIds } = await imp('services/folderSync.js');
+const Email = (await imp('src/models/email.js')).default;
+const { saveOutlookMessages, getFolderThreads, syncConversationIds } = await imp('src/services/sync/folderSync.js');
 await Email.init();
 
 const user = { _id: new mongoose.Types.ObjectId() };

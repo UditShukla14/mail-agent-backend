@@ -12,7 +12,7 @@
  * Graph access and the delta state are injected so the logic can be tested without Outlook.
  */
 
-import Email from '../models/email.js';
+import Email from '../../models/email.js';
 
 const MAX_IDS_FOR_CLEANUP = 50000; // the id list goes into one query
 const PAGE_PAUSE_MS = 150; // be polite to Graph

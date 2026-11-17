@@ -1,8 +1,8 @@
 import { getToken } from '../utils/tokenManager.js';
-import { getMessagesByFolder, getMessageById } from './outlookService.js';
+import { getMessagesByFolder, getMessageById } from './outlook/outlookService.js';
 import Email from '../models/email.js';
 import User from '../models/User.js';
-import focusAssignmentService from './focusAssignmentService.js';
+import focusAssignmentService from './ai/focusAssignmentService.js';
 import mongoose from 'mongoose';
 
 // ---- recently opened messages (in memory, per process) ----

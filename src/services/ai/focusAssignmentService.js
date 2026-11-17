@@ -1,9 +1,9 @@
 // services/focusAssignmentService.js
-import EmailAccount from '../models/EmailAccount.js';
-import Email from '../models/email.js';
-import User from '../models/User.js';
-import { updateFocusItemActivity } from '../controllers/focusController.js';
-import { debug } from '../utils/logger.js';
+import EmailAccount from '../../models/EmailAccount.js';
+import Email from '../../models/email.js';
+import User from '../../models/User.js';
+import { updateFocusItemActivity } from '../../controllers/focusController.js';
+import { debug } from '../../utils/logger.js';
 
 class FocusAssignmentService {
   constructor() {

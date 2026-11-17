@@ -6,7 +6,7 @@ import User from '../models/User.js';
 import EmailAccount from '../models/EmailAccount.js';
 import { authenticateUser } from '../middleware/auth.js';
 import { getUserTokens, deleteToken, refreshSpecificToken } from '../utils/tokenManager.js';
-import { deleteMailSubscriptionForAccount } from '../services/outlookSubscriptionService.js';
+import { deleteMailSubscriptionForAccount } from '../services/outlook/outlookSubscriptionService.js';
 import { debug } from '../utils/logger.js';
 
 const router = express.Router();

@@ -10,10 +10,10 @@ const imp = (rel) => import(pathToFileURL(`${ROOT}/${rel}`).href);
 const mongod = await MongoMemoryServer.create();
 const mongoose = (await imp('node_modules/mongoose/index.js')).default;
 await mongoose.connect(mongod.getUri('mail_test'));
-const Email = (await imp('models/email.js')).default;
-const User = (await imp('models/User.js')).default;
-const EmailAccount = (await imp('models/EmailAccount.js')).default;
-const api = await imp('controllers/emailSearchController.js');
+const Email = (await imp('src/models/email.js')).default;
+const User = (await imp('src/models/User.js')).default;
+const EmailAccount = (await imp('src/models/EmailAccount.js')).default;
+const api = await imp('src/controllers/emailSearchController.js');
 
 const kevin = await User.create({ worxstreamUserId: 16, email: 'udit@alphaparktech.com', name: 'Udit' });
 const other = await User.create({ worxstreamUserId: 64, email: 'someone@else.com', name: 'Else' });
