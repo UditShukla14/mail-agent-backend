@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { worxstreamApi } from '../services/worxstreamApi.js';
+import { rememberCompany } from '../services/companies.js';
 
 /**
  * Bearer-token verification against the worXstream API. This is the only source of the caller's identity:
@@ -35,6 +36,7 @@ export async function verifyBearerToken(token) {
   if (result?.success && result.user && result.user.id != null) {
     if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
     cache.set(key, { user: result.user, expires: Date.now() + CACHE_TTL_MS });
+    rememberCompany(result.user);
     return { user: result.user };
   }
   return { user: null, reason: classifyFailure(result?.status) };

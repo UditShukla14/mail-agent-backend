@@ -1,131 +1,47 @@
 import emailEnrichmentService from './emailEnrichment.js';
-import Email from '../../models/email.js';
 import { debug } from '../../utils/logger.js';
 
-// Configuration
-const CONFIG = {
-  retryDelay: 60000, // 1 minute delay between retries
-  maxRetries: 3,
-  batchSize: 5 // Back to 5 emails per batch as requested
-};
+const CHUNK_SIZE = 5; // analyses run this many at a time (the LLM client also caps concurrency)
 
-// Process a single email with retries
-async function processEmailWithRetry(email, retryCount = 0, emitCallback = null) {
+/**
+ * Analyse one email and report progress through `emit` (a socket emitter, or nothing).
+ * Retrying across the model family happens inside the Raven agent, so a failure here is final: it is saved
+ * on the message by the enrichment service and the user can press Re-analyze.
+ */
+async function processEmail(email, emit) {
+  const send = (payload) => {
+    try {
+      emit?.('mail:enrichmentStatus', { messageId: email.id, ...payload });
+    } catch (error) {
+      debug(`📡 Could not emit status for ${email.id}: ${error.message}`); // the result is saved either way
+    }
+  };
+
+  send({ status: 'analyzing', message: 'Analyzing email content...' });
   try {
-    // Try to emit analyzing status (but don't fail if socket is not available)
-    try {
-      if (emitCallback) {
-        debug(`📡 Calling emitCallback for analyzing status for email ${email.id}`);
-        emitCallback('mail:enrichmentStatus', {
-          messageId: email.id,
-          status: 'analyzing',
-          message: 'Analyzing email content...'
-        });
-      } else {
-        debug(`⚠️ No emitCallback available for analyzing status for email ${email.id}`);
-      }
-    } catch (socketError) {
-      debug('📡 Socket not available for analyzing status, continuing with processing...');
+    const updated = await emailEnrichmentService.enrichEmail(email, false);
+    // Safety net: a result without an analysis is reported as an error rather than as completed.
+    if (!updated?.aiMeta?.summary || updated.aiMeta.error) {
+      send({ status: 'error', message: 'Not analysed', error: true });
+      return { success: false, error: new Error('Not analysed') };
     }
-
-    // Use our custom enrichment service with database categories instead of hardcoded ones
-    debug(`🔍 Processing email ${email.id} with custom enrichment service`);
-    const updatedEmail = await emailEnrichmentService.enrichEmail(email, false);
-    
-    debug(`✅ Email ${email.id} processed and saved to database successfully`);
-    
-    // Try to emit completion status (but don't fail if socket is not available)
-    try {
-      if (emitCallback) {
-        debug(`📡 Calling emitCallback for completion status for email ${email.id}`);
-        emitCallback('mail:enrichmentStatus', {
-          messageId: email.id,
-          status: 'completed',
-          message: 'Email analysis completed',
-          aiMeta: updatedEmail.aiMeta,
-          email: updatedEmail
-        });
-      } else {
-        debug(`⚠️ No emitCallback available for completion status for email ${email.id}`);
-      }
-    } catch (socketError) {
-      debug(`📡 Socket not available for completion status for email ${email.id}, but data is saved to database`);
-    }
-    
-    return { success: true, data: updatedEmail };
+    send({ status: 'completed', message: 'Email analysis completed', aiMeta: updated.aiMeta, email: updated });
+    return { success: true, data: updated };
   } catch (error) {
-    console.error(`❌ Attempt ${retryCount + 1} failed for email ${email.id}: ${error.message}`);
-    
-    if (retryCount < CONFIG.maxRetries) {
-      const delay = CONFIG.retryDelay * Math.pow(2, retryCount); // Exponential backoff
-      debug(`⏳ Waiting ${delay/1000} seconds before retry...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return processEmailWithRetry(email, retryCount + 1, emitCallback);
-    }
-    
-    // ALWAYS save error status to database
-    await Email.findByIdAndUpdate(email._id, {
-      $set: {
-        'aiMeta.error': `Failed after ${CONFIG.maxRetries} attempts: ${error.message}`,
-        'aiMeta.enrichedAt': new Date(),
-        'aiMeta.version': '1.0',
-        isProcessed: false
-      }
-    });
-
-    console.warn(`❌ Email ${email.id} failed after ${CONFIG.maxRetries} attempts, error saved to database`);
-
-    // Try to emit error status (but don't fail if socket is not available)
-    try {
-      if (emitCallback) {
-        debug(`📡 Calling emitCallback for error status for email ${email.id}`);
-        emitCallback('mail:enrichmentStatus', {
-          messageId: email.id,
-          status: 'error',
-          message: `Failed after ${CONFIG.maxRetries} attempts: ${error.message}`,
-          error: true
-        });
-      } else {
-        debug(`⚠️ No emitCallback available for error status for email ${email.id}`);
-      }
-    } catch (socketError) {
-      debug(`📡 Socket not available for error status for email ${email.id}, but error is saved to database`);
-    }
-    
+    send({ status: 'error', message: error.message, error: true });
     return { success: false, error };
   }
 }
 
-// Process a batch of emails
-export async function processEnrichmentBatch(emails, emitCallback = null) {
-  debug(`🔄 Processing batch of ${emails.length} emails`);
-  
-  // Process emails in chunks
+/** Analyse a batch of emails a few at a time. */
+export async function processEnrichmentBatch(emails, emit = null) {
   const results = [];
-  for (let i = 0; i < emails.length; i += CONFIG.batchSize) {
-    const chunk = emails.slice(i, i + CONFIG.batchSize);
-    debug(`📧 Processing chunk of ${chunk.length} emails`);
-    
-    const chunkResults = await Promise.allSettled(
-      chunk.map(email => processEmailWithRetry(email, 0, emitCallback))
-    );
-    results.push(...chunkResults);
-    
-    // Add a delay between chunks
-    if (i + CONFIG.batchSize < emails.length) {
-      const delay = 30000; // 30 seconds delay between chunks
-      debug(`⏳ Waiting ${delay/1000} seconds before next chunk...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-    }
+  for (let i = 0; i < emails.length; i += CHUNK_SIZE) {
+    const chunk = emails.slice(i, i + CHUNK_SIZE);
+    results.push(...(await Promise.all(chunk.map((email) => processEmail(email, emit)))));
   }
-
-  const successful = results.filter(r => r.status === 'fulfilled' && r.value?.success).length;
-  const failed = results.length - successful;
-  
-  console.log(`✅ Batch completed: ${successful} successful, ${failed} failed`);
-  
-  return {
-    successful: results.filter(r => r.status === 'fulfilled' && r.value?.success).map(r => r.value.data),
-    failed: results.filter(r => r.status === 'rejected' || !r.value?.success).map(r => r.reason || r.value?.error)
-  };
-} 
+  const successful = results.filter((r) => r.success).map((r) => r.data);
+  const failed = results.filter((r) => !r.success).map((r) => r.error);
+  console.log(`✅ Analysis batch finished: ${successful.length} done, ${failed.length} failed`);
+  return { successful, failed };
+}

@@ -1,12 +1,11 @@
-import Anthropic from '@anthropic-ai/sdk';
-import dotenv from 'dotenv';
-import { ANTHROPIC_MODEL } from '../../config/anthropic.js';
+import { llm } from '../../agents/core/llmClient.js';
 
-dotenv.config();
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+/** One text completion through the model family (falls back to the next model if one is retired or overloaded). */
+async function complete({ system, user, maxTokens = 1000 }) {
+  const { message } = await llm.call({ max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] });
+  const text = (message.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  return { text, usage: message.usage };
+}
 
 export class AIReplyService {
   static async generateReply(context) {
@@ -37,21 +36,11 @@ export class AIReplyService {
 
       const userPrompt = `Original Email:\nFrom: ${originalEmail.from}\nSubject: ${originalEmail.subject}\nContent: ${originalEmail.content || originalEmail.body || ''}\nTimestamp: ${originalEmail.timestamp}\n\nRecipient Name: ${recipientName}\nSender Name: ${senderName}\n\nPlease generate a ${userTone} reply for this email, using the names above.`;
 
-      const response = await anthropic.messages.create({
-        model: ANTHROPIC_MODEL,
-        max_tokens: 1000,
-        system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: userPrompt
-          }
-        ]
-      });
+      const response = await complete({ system: systemPrompt, user: userPrompt });
 
       return {
         success: true,
-        reply: response.content[0].text.trim(),
+        reply: response.text,
         usage: response.usage
       };
 
@@ -92,19 +81,9 @@ export class AIReplyService {
 
       const userPrompt = `Please compose a ${userTone} email with the following details:\n\nSubject: ${subject || 'No subject provided'}\nRecipient: ${recipient || 'No recipient specified'}\nPurpose: ${purpose || 'General communication'}\n\nRecipient Name: ${recipientName}\nSender Name: ${senderName}\n\nGenerate both a subject line (if not provided) and email body. IMPORTANT: Use the actual names provided above in the email. If recipient name is available, use it in the greeting. If sender name is available, use it in the signature. DO NOT use placeholders like [Recipient] or [Sender].`;
 
-      const response = await anthropic.messages.create({
-        model: ANTHROPIC_MODEL,
-        max_tokens: 1000,
-        system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: userPrompt
-          }
-        ]
-      });
+      const response = await complete({ system: systemPrompt, user: userPrompt });
 
-      const content = response.content[0].text.trim();
+      const content = response.text;
       
       // Try to extract subject and body if both were generated
       const lines = content.split('\n');
@@ -162,21 +141,11 @@ Additional context: ${additionalContext}`;
 
       const userPrompt = `Please improve the following email content:\n\n${currentContent}\n\nImprovement type: ${improvementType}\nDesired tone: ${userTone}\nRecipient Name: ${recipientName}\nSender Name: ${senderName}\n\nReturn only the improved email content, using the names above.`;
 
-      const response = await anthropic.messages.create({
-        model: ANTHROPIC_MODEL,
-        max_tokens: 1000,
-        system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: userPrompt
-          }
-        ]
-      });
+      const response = await complete({ system: systemPrompt, user: userPrompt });
 
       return {
         success: true,
-        improvedContent: response.content[0].text.trim(),
+        improvedContent: response.text,
         usage: response.usage
       };
 

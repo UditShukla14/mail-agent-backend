@@ -4,7 +4,6 @@
  */
 
 import Email from '../../models/email.js';
-import { getFolderThreadIds } from '../outlook/outlookService.js';
 
 /** Messages without a conversation id (not synced yet) stand alone, keyed by their own id. */
 const THREAD_KEY = {
@@ -102,66 +101,4 @@ export async function getFolderThreads({ user, email, folderId, page = 1, pageSi
     };
   });
   return { messages, hasMore };
-}
-
-/**
- * Make the saved copy of a folder equal to Outlook's: walk the folder listing (ids and conversation ids only, 100 per
- * call), set every saved message's conversation id and attachment flag to Outlook's, and, once the whole folder has been
- * listed, drop saved messages Outlook no longer has in it (deleted or moved).
- *
- * @param {{ token: string, user: { _id: any }, email: string, folderId: string, maxPages?: number, list?: typeof getFolderThreadIds }} args
- * @returns {Promise<{ scanned: number, updated: number, removed: number, complete: boolean, missing: number }>}
- */
-export async function syncConversationIds({ token, user, email, folderId, maxPages = 20, list = getFolderThreadIds }) {
-  const startedAt = Date.now();
-  const seen = new Set();
-  let link = null;
-  let scanned = 0;
-  let updated = 0;
-  let complete = false;
-
-  for (let i = 0; i < maxPages; i++) {
-    const { rows, nextLink } = await list(token, folderId, link);
-    for (const r of rows) seen.add(r.id);
-    scanned += rows.length;
-    if (rows.length) {
-      const res = await Email.bulkWrite(
-        rows.map((r) => ({
-          updateOne: {
-            filter: { id: r.id, email },
-            update: { $set: { conversationId: r.conversationId, hasAttachments: r.hasAttachments } },
-          },
-        })),
-        { ordered: false },
-      );
-      updated += res.modifiedCount ?? 0;
-    }
-    if (!nextLink) {
-      complete = true;
-      break;
-    }
-    link = nextLink;
-  }
-
-  // Only a fully listed, non-empty folder can say what is gone. Messages saved in the last minutes are left alone
-  // (the listing can lag behind mail that just arrived).
-  let removed = 0;
-  if (complete && seen.size > 0) {
-    const res = await Email.deleteMany({
-      userId: user._id,
-      email,
-      folder: folderId,
-      id: { $nin: [...seen] },
-      createdAt: { $lt: new Date(startedAt - 5 * 60 * 1000) },
-    });
-    removed = res.deletedCount ?? 0;
-  }
-
-  const missing = await Email.countDocuments({
-    userId: user._id,
-    email,
-    folder: folderId,
-    $or: [{ conversationId: { $exists: false } }, { conversationId: '' }],
-  });
-  return { scanned, updated, removed, complete, missing };
 }

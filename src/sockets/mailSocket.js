@@ -5,7 +5,6 @@ import {
   getConversationMessages,
   getAttachmentContent,
   fetchInlineImages,
-  getFolderThreadIds,
   getMessageById,
   sendEmail,
   replyToEmail,
@@ -28,7 +27,7 @@ import emailEnrichmentService from '../services/ai/emailEnrichment.js';
 import { processEnrichmentBatch } from '../services/ai/enrichmentProcessor.js';
 import axios from 'axios';
 import emailService from '../services/emailService.js';
-import { saveOutlookMessages, getFolderThreads, syncConversationIds } from '../services/sync/folderSync.js';
+import { saveOutlookMessages, getFolderThreads } from '../services/sync/folderSync.js';
 import { startAccountSync, getSyncStatus } from '../services/sync/syncJobs.js';
 import { ensureSubscriptionForAccount } from '../services/outlook/outlookSubscriptionService.js';
 import { debug } from '../utils/logger.js';
@@ -237,64 +236,6 @@ export const initMailSocket = (socket, io) => {
     } catch (error) {
       console.error('❌ Error in mail:getFolders:', error);
       socket.emit('mail:error', outlookFailureMessage(error, 'Failed to get folders'));
-    }
-  });
-
-  // 🔄 Sync one folder with Outlook: pull its newest messages, then make the saved conversation ids (and the saved
-  // list of messages) equal to what Outlook has, and tell the client what changed.
-  const SYNC_PAGES = 3;
-  const syncingFolders = new Set();
-  onAuthed('mail:syncFolder', async ({ worxstreamUserId, email, folderId }) => {
-    const lockKey = `${worxstreamUserId}:${email}:${folderId}`;
-    if (!email || !folderId) return socket.emit('mail:error', 'email and folderId are required to sync a folder');
-    if (syncingFolders.has(lockKey)) return; // already running; its result will arrive
-    syncingFolders.add(lockKey);
-    try {
-      const token = await getToken(worxstreamUserId, email, 'outlook');
-      if (!token) return socket.emit('mail:error', `Email account ${email} is not connected or has expired.`);
-      const user = await User.findOne({ worxstreamUserId });
-      if (!user) return socket.emit('mail:error', 'User not found');
-
-      const key = `${socket.id}-${folderId}`;
-      folderPaginationMap.delete(key);
-      let next = null;
-      let fetched = 0;
-      for (let page = 1; page <= SYNC_PAGES; page++) {
-        const { messages: batch, nextLink } = await withTokenRefresh(
-          (accessToken) => getMessagesByFolder(accessToken, folderId, next, 20, { throwOnError: true }),
-          {
-            accessToken: token,
-            refresh: () => refreshSpecificToken(worxstreamUserId, email, 'outlook'),
-            getFreshToken: () => getToken(worxstreamUserId, email, 'outlook'),
-          },
-        );
-        if (page === 1 && nextLink) folderPaginationMap.set(key, nextLink); // "load more" continues after page 1
-        await saveOutlookMessages(user, email, folderId, batch);
-        fetched += batch.length;
-        if (!nextLink) break;
-        next = nextLink;
-      }
-
-      // Conversation ids and the folder's contents follow Outlook. A failure here does not undo the pull above.
-      let threads = { updated: 0, removed: 0, missing: 0 };
-      try {
-        threads = await syncConversationIds({ token: (await getToken(worxstreamUserId, email, 'outlook')) || token, user, email, folderId });
-      } catch (error) {
-        console.error('⚠️ Conversation id sync failed:', error?.response?.status || error.message);
-      }
-      socket.emit('mail:folderSynced', {
-        folderId,
-        fetched,
-        threadsUpdated: threads.updated,
-        removed: threads.removed,
-        missingThreadIds: threads.missing,
-      });
-    } catch (error) {
-      console.error('❌ Error in mail:syncFolder:', error);
-      socket.emit('mail:error', outlookFailureMessage(error, 'Failed to sync the folder'));
-      socket.emit('mail:folderSynced', { folderId, fetched: 0, failed: true });
-    } finally {
-      syncingFolders.delete(lockKey);
     }
   });
 

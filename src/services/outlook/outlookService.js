@@ -672,19 +672,6 @@ export async function listFolderMessageMeta(accessToken, folderId, nextLink = nu
 }
 
 /**
- * Light listing of a folder: only the ids and thread ids, 100 per page. Used to give conversation ids to messages that
- * were saved before threading existed (one Graph call per 100 messages instead of one per message).
- */
-export async function getFolderThreadIds(accessToken, folderId, nextLink = null) {
-  const url = nextLink || `https://graph.microsoft.com/v1.0/me/mailFolders/${folderId}/messages?$top=100&$orderby=receivedDateTime desc&$select=id,conversationId,hasAttachments`;
-  const res = await retryTransient(() => axios.get(url, { headers: { Authorization: `Bearer ${accessToken}` } }));
-  return {
-    rows: (res.data.value || []).map((m) => ({ id: m.id, conversationId: m.conversationId || '', hasAttachments: Boolean(m.hasAttachments) })),
-    nextLink: res.data['@odata.nextLink'] || null,
-  };
-}
-
-/**
  * The messages of one conversation (Outlook thread), newest first. Summary fields only: the body of a message is
  * fetched when the user opens it. Sent replies and other folders are included because Graph filters the whole mailbox.
  */

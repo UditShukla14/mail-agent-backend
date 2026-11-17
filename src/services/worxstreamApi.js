@@ -24,6 +24,33 @@ const WORXSTREAM_API_CONFIG = {
  * The user object from a /api/user-info body. Same shapes the Sign and Chat servers accept:
  * `{ data: { user } }`, `{ user }`, or the user fields at the top level.
  */
+const readId = (v) => (typeof v === 'number' && Number.isFinite(v) ? String(Math.trunc(v)) : typeof v === 'string' && v.trim() ? v.trim() : '');
+
+/** Company ids a /api/user-info body lists for the user (companyRoles keys/values and userRelations). */
+export function extractCompanyIds(body) {
+  const nested = body?.data && typeof body.data === 'object' ? body.data : null;
+  const roles = nested?.companyRoles ?? body?.companyRoles;
+  const user = nested?.user ?? body?.user;
+  const ids = new Set();
+  if (roles && typeof roles === 'object') {
+    for (const [key, role] of Object.entries(roles)) {
+      const fromKey = readId(key);
+      if (fromKey) ids.add(fromKey);
+      if (role && typeof role === 'object') {
+        const fromRole = readId(role.companyId ?? role.company_id);
+        if (fromRole) ids.add(fromRole);
+      }
+    }
+  }
+  if (Array.isArray(user?.userRelations)) {
+    for (const rel of user.userRelations) {
+      const id = rel && typeof rel === 'object' ? readId(rel.companyId ?? rel.company_id) : '';
+      if (id) ids.add(id);
+    }
+  }
+  return [...ids];
+}
+
 export function extractUserFromUserInfo(body) {
   if (!body || typeof body !== 'object') return null;
   const nested = body.data && typeof body.data === 'object' ? body.data : null;
@@ -119,7 +146,7 @@ class WorxstreamApiService {
       // Check if it has the expected format
       const user = extractUserFromUserInfo(response);
       if (user) {
-        return { success: true, user };
+        return { success: true, user: { ...user, companyIds: extractCompanyIds(response) } };
       } else {
         // A 200 that is not user data (for example a login page) means the token was not accepted.
         console.warn('⚠️ Token verification: response is not user data');

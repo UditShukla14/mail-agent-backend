@@ -6,6 +6,7 @@ import { cleanPreview } from '../utils/previewText.js';
 import { getMessageById, listAllFolders, listAttachmentMeta, getConversationLive, getMessageUniqueText, buildKql, searchMessagesLive, wellKnownFolderIds } from '../services/outlook/outlookService.js';
 import SyncJob from '../models/SyncJob.js';
 import SyncState from '../models/SyncState.js';
+import { htmlToPlainText } from '../utils/plainText.js';
 
 const MAX_LIMIT = 25;
 const DEFAULT_LIMIT = 10;
@@ -52,22 +53,7 @@ export function buildSearchQuery({ userId, accountEmails, params }) {
 export const clampLimit = (value) => Math.min(Math.max(parseInt(value, 10) || DEFAULT_LIMIT, 1), MAX_LIMIT);
 
 /** HTML or text body to plain text for model/agent use, capped. */
-export function toPlainText(content) {
-  const text = String(content || '')
-    .replace(/<(style|script)[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<br\s*\/?>|<\/p>|<\/div>|<\/tr>|<\/li>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n\s*\n\s*\n+/g, '\n\n')
-    .trim();
-  return { text: text.slice(0, BODY_CHAR_LIMIT), truncated: text.length > BODY_CHAR_LIMIT };
-}
+export const toPlainText = (content) => htmlToPlainText(content, BODY_CHAR_LIMIT);
 
 async function loadScope(req) {
   const user = await User.findOne({ worxstreamUserId: Number(req.user.id) });

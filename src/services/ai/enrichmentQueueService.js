@@ -161,7 +161,7 @@ class EnrichmentQueueService {
     }
 
     
-    // Process emails in batches of 5 for API calls (matching claudeApiService)
+    // Process emails in batches of 5 for API calls
     const batchSize = 5;
     const batches = [];
     

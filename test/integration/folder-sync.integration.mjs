@@ -12,7 +12,7 @@ const mongoose = (await imp('node_modules/mongoose/index.js')).default;
 await mongoose.connect(mongod.getUri('mail_test'));
 
 const Email = (await imp('src/models/email.js')).default;
-const { saveOutlookMessages, getFolderThreads, syncConversationIds } = await imp('src/services/sync/folderSync.js');
+const { saveOutlookMessages, getFolderThreads } = await imp('src/services/sync/folderSync.js');
 await Email.init();
 
 const user = { _id: new mongoose.Types.ObjectId() };
@@ -40,44 +40,6 @@ assert.equal(page.messages[0].content, undefined); // bodies are not sent with t
 const p1 = await getFolderThreads({ user, email, folderId: 'inbox', page: 1, pageSize: 2 });
 const p2 = await getFolderThreads({ user, email, folderId: 'inbox', page: 2, pageSize: 2 });
 assert.deepEqual([p1.messages.length, p1.hasMore, p2.messages.map((m) => m.id), p2.hasMore], [2, true, ['b1'], false]);
-
-// ---- sync: the saved ids become Outlook's ----
-await Email.updateOne({ id: 'a2', email }, { $set: { conversationId: '' } }); // lost its id
-await Email.updateOne({ id: 'a1', email }, { $set: { conversationId: 'stale' } }); // wrong id
-const listing = [
-  { rows: [{ id: 'a3', conversationId: 'c1', hasAttachments: true }, { id: 'a2', conversationId: 'c1', hasAttachments: false }], nextLink: 'next' },
-  { rows: [{ id: 'a1', conversationId: 'c1', hasAttachments: false }, { id: 'b1', conversationId: 'c2', hasAttachments: false }, { id: 'legacy', conversationId: 'c3', hasAttachments: false }], nextLink: null },
-];
-let call = 0;
-const res = await syncConversationIds({ token: 't', user, email, folderId: 'inbox', list: async () => listing[call++] });
-assert.equal(res.complete, true);
-assert.equal(res.scanned, 5);
-assert.equal((await Email.findOne({ id: 'a2' })).conversationId, 'c1');
-assert.equal((await Email.findOne({ id: 'a1' })).conversationId, 'c1'); // corrected
-assert.equal((await Email.findOne({ id: 'a3' })).hasAttachments, true);
-assert.equal(res.missing, 0);
-page = await getFolderThreads({ user, email, folderId: 'inbox', page: 1, pageSize: 20 });
-assert.equal(page.messages.length, 3); // c1, c2, c3: the thread is whole now
-assert.equal(page.messages.find((m) => m.conversationId === 'c1').threadCount, 4);
-
-// ---- a message Outlook no longer has in the folder is dropped, but only when it is not brand new ----
-await Email.collection.insertOne({ id: 'gone', email, userId: user._id, folder: 'inbox', from: 'x', timestamp: new Date(), conversationId: 'c9', createdAt: new Date(Date.now() - 3600_000), updatedAt: new Date() });
-await Email.collection.insertOne({ id: 'justArrived', email, userId: user._id, folder: 'inbox', from: 'x', timestamp: new Date(), conversationId: 'c8', createdAt: new Date(), updatedAt: new Date() });
-call = 0;
-const res2 = await syncConversationIds({ token: 't', user, email, folderId: 'inbox', list: async () => listing[call++] });
-assert.equal(res2.removed, 1);
-assert.equal(await Email.countDocuments({ id: 'gone' }), 0);
-assert.equal(await Email.countDocuments({ id: 'justArrived' }), 1);
-assert.equal(await Email.countDocuments({ id: 's1' }), 1); // other folders are never touched
-
-// ---- nothing is deleted from an empty or incomplete listing ----
-await Email.collection.insertOne({ id: 'keep', email, userId: user._id, folder: 'inbox', from: 'x', timestamp: new Date(), createdAt: new Date(Date.now() - 3600_000), updatedAt: new Date() });
-const empty = await syncConversationIds({ token: 't', user, email, folderId: 'inbox', list: async () => ({ rows: [], nextLink: null }) });
-assert.equal(empty.removed, 0);
-const partial = await syncConversationIds({ token: 't', user, email, folderId: 'inbox', maxPages: 1, list: async () => ({ rows: [{ id: 'a3', conversationId: 'c1', hasAttachments: false }], nextLink: 'more' }) });
-assert.equal(partial.complete, false);
-assert.equal(partial.removed, 0);
-assert.equal(await Email.countDocuments({ id: 'keep' }), 1);
 
 console.log('folder-sync integration: ok');
 await mongoose.disconnect();

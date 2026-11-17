@@ -31,6 +31,9 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  // worXstream company the user belongs to (from /api/user-info). Raven is subscribed and billed per company.
+  companyId: { type: String, default: '' },
+  companyIds: { type: [String], default: [] },
   createdAt: {
     type: Date,
     default: Date.now
