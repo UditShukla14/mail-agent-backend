@@ -8,6 +8,7 @@ import { socketCorsOptions } from './config/cors.js';
 import { initMailSocket } from './sockets/mailSocket.js';
 import { verifyBearerToken, DEV_USER, isDevFallbackAllowed } from './utils/authVerify.js';
 import { debug } from './utils/logger.js';
+import { rememberCompany } from './services/companies.js';
 
 import emailEnrichmentService from './services/ai/emailEnrichment.js';
 import './services/ai/enrichmentQueueService.js'; // starts the enrichment queue on import
@@ -43,6 +44,7 @@ io.use(async (socket, next) => {
 
     const { user, reason } = await verifyBearerToken(token);
     if (user) {
+      rememberCompany(user, socket.handshake.auth?.companyId); // the company this person is working in: Raven credit is that company's
       socket.user = user;
       socket.token = token;
       debug('Socket authenticated for user:', user.email);

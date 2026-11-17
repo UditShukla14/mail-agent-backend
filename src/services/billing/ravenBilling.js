@@ -1,4 +1,4 @@
-import { hubConfig, hubEnabled } from '../../config/hub.js';
+import { hubConfig, hubEnabled, billingExplicitlyOff } from '../../config/hub.js';
 import { debug } from '../../utils/logger.js';
 
 const ALLOWED_TTL_MS = 60_000;
@@ -18,7 +18,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * Usage reports are retried, then kept in a small in-memory list and retried every few minutes, so a short hub outage
  * does not lose billable usage. The hub ignores a repeated message id, so retrying is always safe.
  */
-export function createRavenBilling({ fetchImpl = (...a) => fetch(...a), sleepImpl = sleep, now = () => Date.now(), config = hubConfig, enabled = hubEnabled } = {}) {
+export function createRavenBilling({ fetchImpl = (...a) => fetch(...a), sleepImpl = sleep, now = () => Date.now(), config = hubConfig, enabled = hubEnabled, explicitlyOff = billingExplicitlyOff } = {}) {
   const cache = new Map(); // companyId -> { result, expires }
   const pending = [];
   let timer = null;
@@ -37,7 +37,11 @@ export function createRavenBilling({ fetchImpl = (...a) => fetch(...a), sleepImp
 
   /** @returns {Promise<{ allowed: boolean, reason: string, message: string, remaining_usd: number|null }>} */
   async function checkAccess(companyId) {
-    if (!enabled()) return { allowed: true, reason: 'billing_off', message: '', remaining_usd: null };
+    if (!enabled()) {
+      // Billing off on purpose (local development): everyone may use Raven. Otherwise a missing hub setting must not become free use.
+      if (explicitlyOff()) return { allowed: true, reason: 'billing_off', message: '', remaining_usd: null };
+      return { allowed: false, reason: 'billing_not_configured', message: 'Raven is not active yet. Add credits to start using Raven, or ask your administrator to activate it.', remaining_usd: null };
+    }
     const id = String(companyId || '').trim();
     if (!id) return { allowed: false, reason: 'no_company', message: 'Raven could not tell which company this mailbox belongs to. Open Mail once while signed in, then try again.', remaining_usd: null };
     const hit = cache.get(id);

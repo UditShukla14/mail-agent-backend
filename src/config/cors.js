@@ -7,7 +7,7 @@ export const allowedOrigins = [
 ];
 
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'];
-const HEADERS = ['Content-Type', 'Authorization', 'X-User-Info'];
+const HEADERS = ['Content-Type', 'Authorization', 'X-User-Info', 'X-Company-Id'];
 
 export const corsOptions = {
   origin(origin, callback) {

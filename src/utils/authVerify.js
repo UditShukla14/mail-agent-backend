@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 import { worxstreamApi } from '../services/worxstreamApi.js';
-import { rememberCompany } from '../services/companies.js';
 
 /**
  * Bearer-token verification against the worXstream API. This is the only source of the caller's identity:
@@ -8,6 +7,9 @@ import { rememberCompany } from '../services/companies.js';
  *
  * Successful verifications are cached briefly (keyed by a hash of the token) so a page that fires many
  * requests does not call worXstream for each one. Failures are not cached.
+ *
+ * Company selection (which of the user's companies Raven bills) is NOT done here: the REST auth middleware
+ * and the socket handshake call rememberCompany with the company the web app is working in.
  */
 const CACHE_TTL_MS = Number(process.env.AUTH_CACHE_TTL_MS || 60_000);
 const CACHE_MAX = 2000;
@@ -36,7 +38,6 @@ export async function verifyBearerToken(token) {
   if (result?.success && result.user && result.user.id != null) {
     if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
     cache.set(key, { user: result.user, expires: Date.now() + CACHE_TTL_MS });
-    rememberCompany(result.user);
     return { user: result.user };
   }
   return { user: null, reason: classifyFailure(result?.status) };

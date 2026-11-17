@@ -10,9 +10,15 @@ const make = (fetchImpl, extra = {}) => createRavenBilling({ fetchImpl, config: 
 const call = { companyId: 'c1', userId: 7, model: 'claude-haiku-4-5', messageId: 'msg_1', usage: { input_tokens: 1000, output_tokens: 100 } };
 
 describe('Raven billing: access', () => {
-  test('billing off (hub not configured) allows everything', async () => {
-    const b = createRavenBilling({ enabled: () => false });
+  test('billing explicitly switched off (RAVEN_BILLING=off) allows everything', async () => {
+    const b = createRavenBilling({ enabled: () => false, explicitlyOff: () => true });
     assert.equal((await b.checkAccess('c1')).allowed, true);
+  });
+  test('a hub that is not configured does NOT mean free use: Raven stays off with a message', async () => {
+    const b = createRavenBilling({ enabled: () => false, explicitlyOff: () => false });
+    const r = await b.checkAccess('c1');
+    assert.deepEqual([r.allowed, r.reason], [false, 'billing_not_configured']);
+    assert.match(r.message, /Add credits to start using Raven/);
   });
   test('a company that cannot be identified is blocked with an explanation', async () => {
     const r = await make(async () => reply(200, {})).checkAccess('');
@@ -71,7 +77,7 @@ describe('Raven billing: usage', () => {
   });
   test('nothing is sent when billing is off or the call has no id', async () => {
     let n = 0;
-    const off = createRavenBilling({ enabled: () => false, fetchImpl: async () => { n++; return reply(200, {}); } });
+    const off = createRavenBilling({ enabled: () => false, explicitlyOff: () => true, fetchImpl: async () => { n++; return reply(200, {}); } });
     assert.equal(await off.reportUsage(call), false);
     assert.equal(await make(async () => { n++; return reply(200, {}); }).reportUsage({ ...call, messageId: '' }), false);
     assert.equal(n, 0);

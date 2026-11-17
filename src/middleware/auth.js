@@ -1,3 +1,4 @@
+import { rememberCompany } from '../services/companies.js';
 import { verifyBearerToken, DEV_USER, isDevFallbackAllowed } from '../utils/authVerify.js';
 
 const bearerFrom = (req) => {
@@ -18,6 +19,8 @@ export const authenticateUser = async (req, res, next) => {
   try {
     const { user, reason } = await verifyBearerToken(token);
     if (user) {
+      // Working company from the web app (CORS allows X-Company-Id). Must be one of the user's companies.
+      rememberCompany(user, req.headers['x-company-id']);
       req.user = user;
       req.token = token;
       return next();
