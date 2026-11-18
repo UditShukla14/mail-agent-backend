@@ -3,6 +3,8 @@ import { getToken } from '../../utils/tokenManager.js';
 import { getMessageById, getMessageMeta } from './outlookService.js';
 import enrichmentQueueService from '../ai/enrichmentQueueService.js';
 import notificationService from '../notificationService.js';
+import { publishNotification, newMailEvent } from '../notificationHub.js';
+import { companyOf } from '../companies.js';
 import { applyMessageChange } from './messageChanges.js';
 import { debug } from '../../utils/logger.js';
 import {
@@ -46,7 +48,14 @@ async function processChange(account, changeType, messageId) {
       getMeta: (id) => getMessageMeta(accessToken, id),
       getFull: (id) => getMessageById(accessToken, id, { attachments: 'none' }),
       enqueueEnrichment: (docs) => enrichmentQueueService.addToQueue(docs),
-      notifyNew: (doc) => notificationService.notifyNewMail(account.worxstreamUserId, account.email, doc),
+      notifyNew: (doc) => {
+        notificationService.notifyNewMail(account.worxstreamUserId, account.email, doc);
+        // Central notification backend: stored per company and user, so it also reaches pages on other apps.
+        User.findOne({ worxstreamUserId: account.worxstreamUserId }).then((u) => {
+          const companyId = companyOf(u);
+          if (companyId) publishNotification(newMailEvent({ companyId, worxstreamUserId: account.worxstreamUserId, email: account.email, message: doc }));
+        }).catch(() => {});
+      },
       notify: (event, payload) => notificationService.notifyUser(account.worxstreamUserId, event, payload),
     },
   });
